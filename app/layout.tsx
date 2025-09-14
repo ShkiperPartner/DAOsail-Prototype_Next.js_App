@@ -1,5 +1,5 @@
 import './globals.css';
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import { AppProvider } from '@/lib/contexts/app-context';
 
@@ -10,7 +10,11 @@ export const metadata: Metadata = {
   description: 'Navigate the world of decentralized organizations and artificial intelligence with expert guidance.',
   keywords: 'DAO, AI, blockchain, decentralized, organization, artificial intelligence',
   authors: [{ name: 'DAOsail Team' }],
-  viewport: 'width=device-width, initial-scale=1',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
 };
 
 export default function RootLayout({

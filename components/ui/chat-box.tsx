@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,29 +29,14 @@ export function ChatBox({ newQuestion, onQuestionProcessed }: ChatBoxProps) {
   const [error, setError] = useState<string | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
-  // Handle new question from quick questions
-  useEffect(() => {
-    if (newQuestion) {
-      handleSend(newQuestion);
-      onQuestionProcessed?.();
-    }
-  }, [newQuestion]);
-
-  // Auto-scroll to bottom when new messages are added
-  useEffect(() => {
-    if (scrollAreaRef.current) {
-      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
-    }
-  }, [messages]);
-
-  const handleSend = async (message?: string) => {
+  const handleSend = useCallback(async (message?: string) => {
     const messageToSend = message || input.trim();
     if (!messageToSend || isTyping) return;
 
     // Check if user has responses left
     if (responsesLeft <= 0) {
-      setError(language === 'ru' 
-        ? 'Достигнут лимит ответов. Зарегистрируйтесь для продолжения.' 
+      setError(language === 'ru'
+        ? 'Достигнут лимит ответов. Зарегистрируйтесь для продолжения.'
         : 'Response limit reached. Please register to continue.'
       );
       return;
@@ -84,7 +69,22 @@ export function ChatBox({ newQuestion, onQuestionProcessed }: ChatBoxProps) {
       setIsTyping(false);
       decrementResponses();
     }, 1500);
-  };
+  }, [input, isTyping, responsesLeft, language, decrementResponses]);
+
+  // Handle new question from quick questions
+  useEffect(() => {
+    if (newQuestion) {
+      handleSend(newQuestion);
+      onQuestionProcessed?.();
+    }
+  }, [newQuestion, handleSend, onQuestionProcessed]);
+
+  // Auto-scroll to bottom when new messages are added
+  useEffect(() => {
+    if (scrollAreaRef.current) {
+      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
+    }
+  }, [messages]);
 
   const formatTime = (date: Date) => {
     return new Intl.DateTimeFormat(language, {

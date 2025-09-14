@@ -1,18 +1,19 @@
 'use client';
 
 import React from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, UserPlus } from 'lucide-react';
 import { useAppContext } from '@/lib/contexts/app-context';
 
 export function SoftGateBanner() {
-  const { language, responsesLeft, setAuthenticated } = useAppContext();
+  const router = useRouter();
+  const { language, responsesLeft } = useAppContext();
 
   if (responsesLeft > 1) return null;
 
   const handleRegister = () => {
-    // Mock registration - in real app, this would open registration modal
-    setAuthenticated(true);
+    router.push('/signup');
   };
 
   return (
