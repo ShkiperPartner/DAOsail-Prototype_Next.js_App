@@ -1,29 +1,40 @@
 'use client';
 
 import React from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Sun, 
-  Moon, 
-  LogIn, 
-  UserPlus, 
+import {
+  Sun,
+  Moon,
+  LogIn,
+  LogOut,
+  UserPlus,
   Globe,
-  Wifi
+  Wifi,
+  User
 } from 'lucide-react';
 import { useAppContext } from '@/lib/contexts/app-context';
 
 export function TopBar() {
-  const { theme, language, toggleTheme, toggleLanguage, setAuthenticated } = useAppContext();
+  const router = useRouter();
+  const { theme, language, toggleTheme, toggleLanguage, user, isAuthenticated, signOut } = useAppContext();
 
   const handleLogin = () => {
-    // Mock login - in real app, this would open a login modal
-    setAuthenticated(true);
+    router.push('/login');
   };
 
   const handleRegister = () => {
-    // Mock register - in real app, this would open a registration modal
-    setAuthenticated(true);
+    router.push('/signup');
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      router.push('/');
+    } catch (error) {
+      console.error('Sign out error:', error);
+    }
   };
 
   return (
@@ -77,25 +88,51 @@ export function TopBar() {
 
           {/* Auth buttons */}
           <div className="flex items-center space-x-2 ml-2 pl-2 border-l">
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={handleLogin}
-              className="hidden sm:flex items-center gap-1"
-            >
-              <LogIn className="h-4 w-4" />
-              {language === 'ru' ? 'Войти' : 'Login'}
-            </Button>
-            <Button 
-              size="sm"
-              onClick={handleRegister}
-              className="items-center gap-1"
-            >
-              <UserPlus className="h-4 w-4" />
-              <span className="hidden sm:inline">
-                {language === 'ru' ? 'Регистрация' : 'Register'}
-              </span>
-            </Button>
+            {isAuthenticated ? (
+              // Authenticated user UI
+              <>
+                <div className="hidden sm:flex items-center gap-2 text-sm">
+                  <User className="h-4 w-4" />
+                  <span className="text-muted-foreground">
+                    {user?.email?.split('@')[0]}
+                  </span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSignOut}
+                  className="flex items-center gap-1"
+                >
+                  <LogOut className="h-4 w-4" />
+                  <span className="hidden sm:inline">
+                    {language === 'ru' ? 'Выход' : 'Sign Out'}
+                  </span>
+                </Button>
+              </>
+            ) : (
+              // Unauthenticated user UI
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleLogin}
+                  className="hidden sm:flex items-center gap-1"
+                >
+                  <LogIn className="h-4 w-4" />
+                  {language === 'ru' ? 'Войти' : 'Login'}
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleRegister}
+                  className="items-center gap-1"
+                >
+                  <UserPlus className="h-4 w-4" />
+                  <span className="hidden sm:inline">
+                    {language === 'ru' ? 'Регистрация' : 'Register'}
+                  </span>
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </div>
