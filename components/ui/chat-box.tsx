@@ -6,35 +6,69 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { 
-  Send, 
-  Loader2, 
-  Bot, 
+import {
+  Send,
+  Loader2,
+  Bot,
   User,
-  AlertCircle 
+  AlertCircle,
+  Anchor,
+  Navigation
 } from 'lucide-react';
 import { useAppContext } from '@/lib/contexts/app-context';
-import { mockChatMessages, ChatMessage } from '@/data/chat-messages';
+import { chatService, ChatMessage } from '@/lib/services/chat-service';
 
 interface ChatBoxProps {
   newQuestion?: string;
   onQuestionProcessed?: () => void;
+  assistantType?: 'navigator' | 'skipper';
 }
 
-export function ChatBox({ newQuestion, onQuestionProcessed }: ChatBoxProps) {
-  const { language, decrementResponses, responsesLeft } = useAppContext();
-  const [messages, setMessages] = useState<ChatMessage[]>(mockChatMessages);
+export function ChatBox({
+  newQuestion,
+  onQuestionProcessed,
+  assistantType = 'navigator'
+}: ChatBoxProps) {
+  const { language, decrementResponses, responsesLeft, isAuthenticated, incrementStat } = useAppContext();
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string>('');
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  // Initialize session
+  useEffect(() => {
+    const initSession = async () => {
+      try {
+        const id = await chatService.createChatSession(
+          language === 'ru' ? 'Новый чат' : 'New Chat',
+          assistantType
+        );
+        setSessionId(id);
+      } catch (error) {
+        console.error('Failed to create chat session:', error);
+      }
+    };
+
+    if (isAuthenticated) {
+      initSession();
+    }
+  }, [assistantType, isAuthenticated, language]);
 
   const handleSend = useCallback(async (message?: string) => {
     const messageToSend = message || input.trim();
     if (!messageToSend || isTyping) return;
 
-    // Check if user has responses left
-    if (responsesLeft <= 0) {
+    // Validate message
+    const validation = chatService.validateMessage(messageToSend);
+    if (!validation.isValid) {
+      setError(validation.error!);
+      return;
+    }
+
+    // Check if user has responses left (for non-authenticated users)
+    if (!isAuthenticated && responsesLeft <= 0) {
       setError(language === 'ru'
         ? 'Достигнут лимит ответов. Зарегистрируйтесь для продолжения.'
         : 'Response limit reached. Please register to continue.'
@@ -43,33 +77,68 @@ export function ChatBox({ newQuestion, onQuestionProcessed }: ChatBoxProps) {
     }
 
     const userMessage: ChatMessage = {
-      id: Date.now().toString(),
-      type: 'user',
+      role: 'user',
       content: messageToSend,
-      contentRu: messageToSend, // In real app, this would be translated
-      timestamp: new Date(),
+      timestamp: new Date().toISOString()
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
     setInput('');
     setError(null);
     setIsTyping(true);
 
-    // Simulate AI response
-    setTimeout(() => {
-      const assistantMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        type: 'assistant',
-        content: 'Thank you for your question! This is a mock response. In the real application, this would be replaced with actual AI-generated content based on your input.',
-        contentRu: 'Спасибо за ваш вопрос! Это тестовый ответ. В реальном приложении он будет заменён на ответ, генерируемый ИИ на основе вашего запроса.',
-        timestamp: new Date(),
+    try {
+      // Send to OpenAI API
+      const response = await chatService.sendMessage(newMessages, assistantType);
+
+      const aiMessage: ChatMessage = {
+        role: 'assistant',
+        content: response.message.content,
+        timestamp: response.message.timestamp,
+        assistantType: response.message.assistantType,
+        model: response.message.model
       };
 
-      setMessages(prev => [...prev, assistantMessage]);
+      setMessages(prev => [...prev, aiMessage]);
+
+      // Update user statistics if authenticated
+      if (isAuthenticated) {
+        await incrementStat('questionsAsked');
+
+        // Generate title for first message
+        if (newMessages.length === 1) {
+          const title = chatService.generateChatTitle(messageToSend, language);
+          // TODO: Update session title in Supabase
+        }
+      } else {
+        // Decrement responses for guests
+        decrementResponses();
+      }
+
+    } catch (error) {
+      console.error('Chat error:', error);
+      setError(
+        error instanceof Error
+          ? error.message
+          : language === 'ru'
+            ? 'Произошла ошибка при отправке сообщения'
+            : 'An error occurred while sending the message'
+      );
+    } finally {
       setIsTyping(false);
-      decrementResponses();
-    }, 1500);
-  }, [input, isTyping, responsesLeft, language, decrementResponses]);
+    }
+  }, [
+    input,
+    isTyping,
+    messages,
+    assistantType,
+    isAuthenticated,
+    responsesLeft,
+    language,
+    decrementResponses,
+    incrementStat
+  ]);
 
   // Handle new question from quick questions
   useEffect(() => {
@@ -86,19 +155,45 @@ export function ChatBox({ newQuestion, onQuestionProcessed }: ChatBoxProps) {
     }
   }, [messages]);
 
-  const formatTime = (date: Date) => {
+  const formatTime = (timestamp: string) => {
+    const date = new Date(timestamp);
     return new Intl.DateTimeFormat(language, {
       hour: '2-digit',
       minute: '2-digit',
     }).format(date);
   };
 
+  // Get assistant icon and title
+  const getAssistantInfo = () => {
+    if (assistantType === 'skipper') {
+      return {
+        icon: <Anchor className="h-4 w-4" />,
+        title: language === 'ru' ? 'Шкипер' : 'Skipper',
+        bgColor: 'bg-orange-500'
+      };
+    }
+    return {
+      icon: <Navigation className="h-4 w-4" />,
+      title: language === 'ru' ? 'Навигатор' : 'Navigator',
+      bgColor: 'bg-blue-500'
+    };
+  };
+
+  const assistantInfo = getAssistantInfo();
+
   return (
     <Card className="flex flex-col h-[600px]">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2">
-          <Bot className="h-5 w-5 text-primary" />
-          {language === 'ru' ? 'Чат с ИИ' : 'AI Chat'}
+          <div className={`p-2 rounded-full ${assistantInfo.bgColor} text-white`}>
+            {assistantInfo.icon}
+          </div>
+          <div className="flex flex-col">
+            <span className="text-lg">{assistantInfo.title}</span>
+            <span className="text-sm font-normal text-muted-foreground">
+              {language === 'ru' ? 'ИИ-консультант' : 'AI Assistant'}
+            </span>
+          </div>
         </CardTitle>
       </CardHeader>
       
@@ -120,41 +215,46 @@ export function ChatBox({ newQuestion, onQuestionProcessed }: ChatBoxProps) {
                 </p>
               </div>
             ) : (
-              messages.map((message) => (
+              messages.map((message, index) => (
                 <div
-                  key={message.id}
+                  key={`${message.timestamp}-${index}`}
                   className={`flex gap-3 chat-message ${
-                    message.type === 'user' ? 'justify-end' : 'justify-start'
+                    message.role === 'user' ? 'justify-end' : 'justify-start'
                   }`}
                 >
-                  {message.type === 'assistant' && (
+                  {message.role === 'assistant' && (
                     <Avatar className="h-8 w-8 mt-1">
-                      <AvatarFallback className="bg-primary text-primary-foreground">
-                        <Bot className="h-4 w-4" />
+                      <AvatarFallback className={`${assistantInfo.bgColor} text-white`}>
+                        {assistantInfo.icon}
                       </AvatarFallback>
                     </Avatar>
                   )}
-                  
+
                   <div className={`max-w-[80%] ${
-                    message.type === 'user' ? 'order-1' : ''
+                    message.role === 'user' ? 'order-1' : ''
                   }`}>
                     <div className={`p-3 rounded-lg ${
-                      message.type === 'user'
+                      message.role === 'user'
                         ? 'bg-primary text-primary-foreground ml-auto'
                         : 'bg-muted'
                     }`}>
-                      <p className="text-sm whitespace-pre-wrap">
-                        {language === 'ru' ? message.contentRu : message.content}
+                      <p className="text-sm whitespace-pre-wrap leading-relaxed">
+                        {message.content}
                       </p>
+                      {message.model && message.role === 'assistant' && (
+                        <div className="text-xs opacity-60 mt-2">
+                          {message.model}
+                        </div>
+                      )}
                     </div>
                     <div className={`text-xs text-muted-foreground mt-1 ${
-                      message.type === 'user' ? 'text-right' : 'text-left'
+                      message.role === 'user' ? 'text-right' : 'text-left'
                     }`}>
                       {formatTime(message.timestamp)}
                     </div>
                   </div>
-                  
-                  {message.type === 'user' && (
+
+                  {message.role === 'user' && (
                     <Avatar className="h-8 w-8 mt-1">
                       <AvatarFallback className="bg-accent text-accent-foreground">
                         <User className="h-4 w-4" />
@@ -168,15 +268,17 @@ export function ChatBox({ newQuestion, onQuestionProcessed }: ChatBoxProps) {
             {isTyping && (
               <div className="flex gap-3 justify-start chat-message">
                 <Avatar className="h-8 w-8 mt-1">
-                  <AvatarFallback className="bg-primary text-primary-foreground">
-                    <Bot className="h-4 w-4" />
+                  <AvatarFallback className={`${assistantInfo.bgColor} text-white`}>
+                    {assistantInfo.icon}
                   </AvatarFallback>
                 </Avatar>
                 <div className="bg-muted p-3 rounded-lg">
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     <span className="text-sm">
-                      {language === 'ru' ? 'Печатает...' : 'Typing...'}
+                      {language === 'ru'
+                        ? `${assistantInfo.title} думает...`
+                        : `${assistantInfo.title} is thinking...`}
                     </span>
                   </div>
                 </div>

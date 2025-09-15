@@ -22,7 +22,7 @@ port = 54322
 shadow_port = 54320
 # The database major version to use. This has to be the same as your remote database's. Run `SHOW
 # server_version;` on the remote database to check.
-major_version = 15
+major_version = 17
 
 [db.pooler]
 enabled = false
@@ -106,10 +106,10 @@ enable_signup = true
 # If enabled, users need to confirm their phone number before signing in.
 enable_confirmations = false
 # Template for sending a confirmation message
-test_otp = "123456"
+# test_otp = "123456"
 
 # Use pre-defined map of phone number to OTP for testing.
-# [auth.sms.test_otp]
+[auth.sms.test_otp]
 # 4152127777 = "123456"
 
 # Configure one of the supported SMS providers: `twilio`, `twilio_verify`, `messagebird`, `textlocal`, `vonage`.

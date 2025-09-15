@@ -7,12 +7,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { AvatarUpload } from '@/components/ui/avatar-upload';
 import {
   User,
   Edit,
   Save,
-  Camera,
   MapPin,
   Mail,
   Calendar,
@@ -102,23 +101,14 @@ export function ProfileInfoTab() {
         <CardContent className="space-y-6">
           {/* Avatar Section */}
           <div className="flex items-center gap-4">
-            <div className="relative">
-              <Avatar className="h-20 w-20">
-                <AvatarImage src={userProfile.avatarUrl} alt="User avatar" />
-                <AvatarFallback className="bg-gradient-to-br from-primary to-accent text-white text-2xl">
-                  {getInitials(userProfile.fullName)}
-                </AvatarFallback>
-              </Avatar>
-              {isEditing && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="absolute -bottom-2 -right-2 h-8 w-8 rounded-full p-0"
-                >
-                  <Camera className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
+            <AvatarUpload
+              currentAvatar={userProfile.avatarUrl}
+              size="lg"
+              editable={isEditing}
+              onAvatarChange={(url) => {
+                updateProfile({ avatarUrl: url });
+              }}
+            />
             <div className="space-y-2">
               <h3 className="text-xl font-semibold">{userProfile.fullName}</h3>
               <Badge

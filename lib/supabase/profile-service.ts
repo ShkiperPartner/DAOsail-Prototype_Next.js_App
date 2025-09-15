@@ -290,6 +290,57 @@ export class ProfileService {
     };
   }
 
+  // Проверка и автоматическое повышение роли
+  async checkAndPromoteRole(userId: string): Promise<string | null> {
+    try {
+      const fullProfile = await this.getFullProfile(userId);
+      if (!fullProfile) return null;
+
+      const { profile, stats } = fullProfile;
+      const currentRole = profile.role;
+      const nextRole = this.getNextRole(currentRole);
+
+      if (!nextRole) return null; // Уже максимальная роль
+
+      const requirements = this.getRequirementsForNextRole(currentRole);
+      if (!requirements) return null;
+
+      // Проверяем все требования для повышения
+      const meetsRequirements = this.checkRoleRequirements(stats, requirements);
+
+      if (meetsRequirements) {
+        // Повышаем роль
+        const success = await this.updateProfile(userId, { role: nextRole });
+        if (success) {
+          console.log(`🎖️ Role promoted: ${currentRole} → ${nextRole}`);
+          return nextRole;
+        }
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Error checking role promotion:', error);
+      return null;
+    }
+  }
+
+  // Проверка требований для роли
+  private checkRoleRequirements(stats: any, requirements: any): boolean {
+    if (requirements.questionsRequired && stats.questions_asked < requirements.questionsRequired) {
+      return false;
+    }
+    if (requirements.lessonsRequired && stats.lessons_completed < requirements.lessonsRequired) {
+      return false;
+    }
+    if (requirements.articlesRequired && stats.articles_read < requirements.articlesRequired) {
+      return false;
+    }
+    if (requirements.communityRequired && stats.community_messages < requirements.communityRequired) {
+      return false;
+    }
+    return true;
+  }
+
   // Вспомогательные методы
   private getNextRole(currentRole: string): string | null {
     const roleProgression = {

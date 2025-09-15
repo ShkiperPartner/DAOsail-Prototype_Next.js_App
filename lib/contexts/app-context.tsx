@@ -1,7 +1,9 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { profileService } from '@/lib/supabase/profile-service';
+import { achievementService } from '@/lib/services/achievement-service';
 import type { User } from '@supabase/supabase-js';
 import type { UserProfile } from '@/lib/types/profile';
 import { createMockUserProfile } from '@/data/mock-profile';
@@ -31,8 +33,10 @@ interface AppContextType {
   refreshUser: () => Promise<void>;
 
   // Profile methods
-  updateProfile: (updates: Partial<UserProfile>) => void;
-  incrementStat: (stat: keyof UserProfile['stats']) => void;
+  updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
+  incrementStat: (stat: keyof UserProfile['stats']) => Promise<void>;
+  uploadAvatar: (file: File) => Promise<string | null>;
+  loadProfile: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -50,10 +54,52 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Profile state
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
 
   // Helper functions
   const resetResponses = () => {
     setResponsesLeft(3);
+  };
+
+  // Load profile from Supabase
+  const loadProfile = useCallback(async () => {
+    if (!user) return;
+
+    setProfileLoading(true);
+    try {
+      const fullProfile = await profileService.getFullProfile(user.id);
+
+      if (fullProfile) {
+        const appProfile = profileService.transformToAppProfile(fullProfile);
+        // Update email from auth user
+        appProfile.email = user.email || '';
+        setUserProfile(appProfile);
+      } else {
+        // If no profile exists, create initial profile records
+        await createInitialProfile(user);
+      }
+    } catch (error) {
+      console.error('Error loading profile:', error);
+      // Fallback to mock profile
+      const profile = createMockUserProfile(
+        user.email || '',
+        user.user_metadata?.full_name || 'Пользователь'
+      );
+      setUserProfile(profile);
+    } finally {
+      setProfileLoading(false);
+    }
+  }, [user]);
+
+  // Create initial profile records for new user
+  const createInitialProfile = async (authUser: User) => {
+    // This would be implemented to create initial records in Supabase
+    // For now, use mock profile
+    const profile = createMockUserProfile(
+      authUser.email || '',
+      authUser.user_metadata?.full_name || 'Пользователь'
+    );
+    setUserProfile(profile);
   };
 
   // Initialize auth state and listen to auth changes
@@ -71,13 +117,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setUser(session.user);
           setIsAuthenticated(true);
           resetResponses(); // Reset responses for authenticated users
-
-          // Create or load user profile
-          const profile = createMockUserProfile(
-            session.user.email || '',
-            session.user.user_metadata?.full_name || 'Пользователь'
-          );
-          setUserProfile(profile);
         } else {
           setUser(null);
           setIsAuthenticated(false);
@@ -101,13 +140,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           setUser(session.user);
           setIsAuthenticated(true);
           resetResponses();
-
-          // Create or load user profile
-          const profile = createMockUserProfile(
-            session.user.email || '',
-            session.user.user_metadata?.full_name || 'Пользователь'
-          );
-          setUserProfile(profile);
         } else {
           setUser(null);
           setIsAuthenticated(false);
@@ -122,6 +154,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       subscription.unsubscribe();
     };
   }, []);
+
+  // Load profile when user is authenticated
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      loadProfile();
+    }
+  }, [isAuthenticated, user, loadProfile]);
+
+  // Setup real-time subscriptions
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubscribe = profileService.subscribeToProfile(user.id, (fullProfile) => {
+      if (fullProfile) {
+        const appProfile = profileService.transformToAppProfile(fullProfile);
+        appProfile.email = user.email || '';
+        setUserProfile(appProfile);
+
+        // Check for new achievements and show notifications
+        if (userProfile && appProfile.achievements.length > userProfile.achievements.length) {
+          const newAchievements = appProfile.achievements.slice(0, appProfile.achievements.length - userProfile.achievements.length);
+          newAchievements.forEach(achievement => {
+            console.log('🏆 New achievement unlocked:', achievement.title);
+            // Here you could show a toast notification
+          });
+        }
+      }
+    });
+
+    return unsubscribe;
+  }, [user, userProfile]);
 
   // Load saved preferences from localStorage
   useEffect(() => {
@@ -202,13 +265,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (user) {
       setUser(user);
       setIsAuthenticated(true);
-
-      // Refresh profile
-      const profile = createMockUserProfile(
-        user.email || '',
-        user.user_metadata?.full_name || 'Пользователь'
-      );
-      setUserProfile(profile);
     } else {
       setUser(null);
       setIsAuthenticated(false);
@@ -217,42 +273,132 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   // Profile methods
-  const updateProfile = (updates: Partial<UserProfile>) => {
-    if (userProfile) {
-      setUserProfile({ ...userProfile, ...updates });
+  const updateProfile = async (updates: Partial<UserProfile>) => {
+    if (!user || !userProfile) return;
 
-      // In a real app, this would sync with the backend
+    try {
+      // Update in Supabase
+      const profileUpdates: any = {};
+      if (updates.fullName) profileUpdates.full_name = updates.fullName;
+      if (updates.nickname) profileUpdates.nickname = updates.nickname;
+      if (updates.city) profileUpdates.city = updates.city;
+      if (updates.bio) profileUpdates.bio = updates.bio;
+
+      if (Object.keys(profileUpdates).length > 0) {
+        const success = await profileService.updateProfile(user.id, profileUpdates);
+        if (!success) {
+          console.error('Failed to update profile in Supabase');
+          return;
+        }
+      }
+
+      // Update local state
+      setUserProfile({ ...userProfile, ...updates });
       console.log('Profile updated:', updates);
+    } catch (error) {
+      console.error('Error updating profile:', error);
     }
   };
 
-  const incrementStat = (stat: keyof UserProfile['stats']) => {
-    if (userProfile) {
-      const currentValue = userProfile.stats[stat];
-      let newValue: number | Date;
+  const incrementStat = async (stat: keyof UserProfile['stats']) => {
+    if (!user || !userProfile) return;
 
-      if (typeof currentValue === 'number') {
-        newValue = currentValue + 1;
-      } else {
-        // For Date fields like lastLoginDate, update to current date
-        newValue = new Date();
-      }
-
-      const newStats = {
-        ...userProfile.stats,
-        [stat]: newValue
+    try {
+      // Map frontend stat names to backend column names
+      const statMapping: Record<keyof UserProfile['stats'], string> = {
+        questionsAsked: 'questions_asked',
+        lessonsCompleted: 'lessons_completed',
+        articlesRead: 'articles_read',
+        communityMessages: 'community_messages',
+        lastLoginDate: 'last_login_date',
+        totalLogins: 'total_logins'
       };
 
-      if (stat === 'questionsAsked') {
-        decrementResponses();
+      const backendStatName = statMapping[stat];
+      if (!backendStatName) return;
+
+      // For date fields, use different logic
+      if (stat === 'lastLoginDate') {
+        const success = await profileService.updateStats(user.id, {
+          [backendStatName]: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+        if (!success) return;
+
+        setUserProfile({
+          ...userProfile,
+          stats: {
+            ...userProfile.stats,
+            lastLoginDate: new Date()
+          }
+        });
+      } else {
+        // For numeric fields, increment
+        const success = await profileService.incrementStat(user.id, backendStatName);
+        if (!success) return;
+
+        const currentValue = userProfile.stats[stat] as number;
+        const newValue = currentValue + 1;
+
+        const updatedProfile = {
+          ...userProfile,
+          stats: {
+            ...userProfile.stats,
+            [stat]: newValue
+          }
+        };
+
+        setUserProfile(updatedProfile);
+
+        if (stat === 'questionsAsked') {
+          decrementResponses();
+        }
+
+        // Check for new achievements after stat update
+        try {
+          await achievementService.checkAndAddAchievements(user.id, updatedProfile);
+        } catch (error) {
+          console.error('Error checking achievements:', error);
+        }
+
+        // Check for role promotion
+        try {
+          const newRole = await profileService.checkAndPromoteRole(user.id);
+          if (newRole && newRole !== updatedProfile.role) {
+            console.log(`🎖️ Role promoted to: ${newRole}`);
+
+            // Update local profile with new role
+            setUserProfile(prev => prev ? { ...prev, role: newRole } : null);
+
+            // Add role promotion achievement
+            await achievementService.checkAndAddAchievements(user.id, { ...updatedProfile, role: newRole });
+          }
+        } catch (error) {
+          console.error('Error checking role promotion:', error);
+        }
       }
 
-      setUserProfile({
-        ...userProfile,
-        stats: newStats
-      });
+      console.log(`Updated ${stat}`);
+    } catch (error) {
+      console.error('Error incrementing stat:', error);
+    }
+  };
 
-      console.log(`Updated ${stat}:`, newValue);
+  const uploadAvatar = async (file: File): Promise<string | null> => {
+    if (!user) return null;
+
+    try {
+      const avatarUrl = await profileService.uploadAvatar(user.id, file);
+      if (avatarUrl && userProfile) {
+        setUserProfile({
+          ...userProfile,
+          avatarUrl
+        });
+      }
+      return avatarUrl;
+    } catch (error) {
+      console.error('Error uploading avatar:', error);
+      return null;
     }
   };
 
@@ -284,6 +430,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // Profile methods
       updateProfile,
       incrementStat,
+      uploadAvatar,
+      loadProfile,
     }}>
       {children}
     </AppContext.Provider>
