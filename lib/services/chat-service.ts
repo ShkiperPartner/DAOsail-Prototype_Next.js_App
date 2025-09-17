@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/client';
+import type { AccessRole } from '@/lib/supabase/types';
 
 export interface ChatMessage {
   id?: string;
@@ -7,6 +8,11 @@ export interface ChatMessage {
   timestamp: string;
   assistantType?: 'navigator' | 'skipper';
   model?: string;
+  metadata?: {
+    userRole?: string;
+    knowledgeChunksUsed?: number;
+    accessLevel?: AccessRole;
+  };
 }
 
 export interface ChatResponse {
@@ -23,6 +29,10 @@ export interface ChatSession {
   title: string;
   messages: ChatMessage[];
   assistantType: 'navigator' | 'skipper';
+  assistantRole?: string;
+  accessLevel?: AccessRole;
+  tokensUsed?: number;
+  knowledgeChunksUsed?: number;
   created_at: string;
   updated_at: string;
 }
@@ -30,10 +40,12 @@ export interface ChatSession {
 export class ChatService {
   private supabase = createClient();
 
-  // Отправка сообщения к ИИ
+  // Отправка сообщения к ИИ с учетом роли пользователя
   async sendMessage(
     messages: ChatMessage[],
-    assistantType: 'navigator' | 'skipper' = 'navigator'
+    assistantType: 'navigator' | 'skipper' = 'navigator',
+    userRole: string = 'Интересующийся',
+    userId?: string
   ): Promise<ChatResponse> {
     try {
       const response = await fetch('/api/chat', {
@@ -46,7 +58,9 @@ export class ChatService {
             role: msg.role,
             content: msg.content
           })),
-          assistantType
+          assistantType,
+          userRole,
+          userId
         }),
       });
 
@@ -64,35 +78,58 @@ export class ChatService {
     }
   }
 
-  // Создание новой сессии чата
+  // Создание новой сессии чата с роль-информацией
   async createChatSession(
     title: string,
-    assistantType: 'navigator' | 'skipper' = 'navigator'
+    assistantType: 'navigator' | 'skipper' = 'navigator',
+    userRole: string = 'Интересующийся'
   ): Promise<string> {
     try {
       const { data: { user } } = await this.supabase.auth.getUser();
       if (!user) throw new Error('User not authenticated');
 
-      const sessionId = crypto.randomUUID();
+      // Определяем уровень доступа на основе роли
+      const accessLevel = this.getUserAccessLevel(userRole);
 
-      // Пока создаем локально, позже сохраним в Supabase
-      const session: ChatSession = {
-        id: sessionId,
-        title,
-        messages: [],
-        assistantType,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
+      const { data, error } = await this.supabase
+        .from('user_chats')
+        .insert({
+          user_id: user.id,
+          title,
+          assistant_type: assistantType,
+          assistant_role: assistantType === 'navigator' ? 'Навигатор' : 'Шкипер',
+          access_level: accessLevel,
+          messages_count: 0,
+          tokens_used: 0,
+          knowledge_chunks_used: 0,
+          last_activity: new Date().toISOString()
+        })
+        .select()
+        .single();
 
-      // TODO: Сохранить в Supabase
+      if (error) {
+        console.error('Error creating chat session:', error);
+        throw error;
+      }
 
-      return sessionId;
+      return data.id;
 
     } catch (error) {
       console.error('ChatService.createChatSession error:', error);
       throw error;
     }
+  }
+
+  // Определение уровня доступа по роли пользователя
+  private getUserAccessLevel(userRole: string): AccessRole {
+    const roleMapping: Record<string, AccessRole> = {
+      'Интересующийся': 'public',
+      'Пассажир': 'passenger',
+      'Матрос': 'sailor',
+      'Партнер': 'partner'
+    };
+
+    return roleMapping[userRole] || 'public';
   }
 
   // Получение истории чатов пользователя
@@ -128,17 +165,106 @@ export class ChatService {
     }
   }
 
-  // Сохранение сообщений в сессию
-  async saveMessagesToSession(sessionId: string, messages: ChatMessage[]): Promise<void> {
+  // Сохранение отдельного сообщения в chat_messages
+  async saveMessage(
+    chatId: string,
+    message: ChatMessage,
+    tokensUsed: number = 0
+  ): Promise<void> {
     try {
       const { data: { user } } = await this.supabase.auth.getUser();
       if (!user) throw new Error('User not authenticated');
 
-      // TODO: Сохранить в Supabase
+      const { error } = await this.supabase
+        .from('chat_messages')
+        .insert({
+          chat_id: chatId,
+          user_id: user.id,
+          role: message.role,
+          content: message.content,
+          metadata: message.metadata || {},
+          tokens_used: tokensUsed
+        });
+
+      if (error) {
+        console.error('Error saving message:', error);
+        throw error;
+      }
+
+      // Обновляем статистику чата
+      await this.updateChatStatistics(chatId, tokensUsed, message.metadata?.knowledgeChunksUsed || 0);
 
     } catch (error) {
-      console.error('ChatService.saveMessagesToSession error:', error);
+      console.error('ChatService.saveMessage error:', error);
       throw error;
+    }
+  }
+
+  // Обновление статистики чата
+  async updateChatStatistics(
+    chatId: string,
+    additionalTokens: number,
+    additionalChunks: number
+  ): Promise<void> {
+    try {
+      const { error } = await this.supabase
+        .rpc('increment_chat_stats', {
+          chat_id: chatId,
+          tokens_increment: additionalTokens,
+          chunks_increment: additionalChunks
+        });
+
+      if (error) {
+        // Если RPC функция не существует, обновляем вручную
+        const { error: updateError } = await this.supabase
+          .from('user_chats')
+          .update({
+            messages_count: 1, // Increment by 1
+            tokens_used: additionalTokens, // Add to existing
+            knowledge_chunks_used: additionalChunks, // Add to existing
+            last_activity: new Date().toISOString()
+          })
+          .eq('id', chatId);
+
+        if (updateError) {
+          console.error('Error updating chat statistics:', updateError);
+        }
+      }
+
+    } catch (error) {
+      console.error('ChatService.updateChatStatistics error:', error);
+    }
+  }
+
+  // Загрузка сообщений чата
+  async getChatMessages(chatId: string): Promise<ChatMessage[]> {
+    try {
+      const { data: { user } } = await this.supabase.auth.getUser();
+      if (!user) return [];
+
+      const { data, error } = await this.supabase
+        .from('chat_messages')
+        .select('*')
+        .eq('chat_id', chatId)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.error('Error loading chat messages:', error);
+        return [];
+      }
+
+      return data.map(msg => ({
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.created_at,
+        metadata: msg.metadata
+      }));
+
+    } catch (error) {
+      console.error('ChatService.getChatMessages error:', error);
+      return [];
     }
   }
 

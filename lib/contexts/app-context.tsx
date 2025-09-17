@@ -65,6 +65,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const loadProfile = useCallback(async () => {
     if (!user) return;
 
+    console.log('Loading profile for user:', user.id);
     setProfileLoading(true);
     try {
       const fullProfile = await profileService.getFullProfile(user.id);
@@ -93,13 +94,74 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Create initial profile records for new user
   const createInitialProfile = async (authUser: User) => {
-    // This would be implemented to create initial records in Supabase
-    // For now, use mock profile
-    const profile = createMockUserProfile(
-      authUser.email || '',
-      authUser.user_metadata?.full_name || 'Пользователь'
-    );
-    setUserProfile(profile);
+    try {
+      console.log('Creating initial profile for user:', authUser.id);
+
+      const supabase = createClient();
+      const now = new Date().toISOString();
+      const fullName = authUser.user_metadata?.full_name || 'Пользователь';
+
+      // Create profile record
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .insert({
+          id: authUser.id,
+          full_name: fullName,
+          nickname: null,
+          avatar_url: null,
+          city: null,
+          bio: null,
+          role: 'Интересующийся',
+          join_date: now
+        })
+        .select()
+        .single();
+
+      if (profileError) {
+        console.error('Error creating profile:', profileError);
+        throw profileError;
+      }
+
+      // Create user_stats record
+      const { data: statsData, error: statsError } = await supabase
+        .from('user_stats')
+        .insert({
+          id: authUser.id,
+          questions_asked: 0,
+          lessons_completed: 0,
+          articles_read: 0,
+          community_messages: 0,
+          last_login_date: now,
+          total_logins: 1
+        })
+        .select()
+        .single();
+
+      if (statsError) {
+        console.error('Error creating user stats:', statsError);
+        throw statsError;
+      }
+
+      console.log('Initial profile created successfully');
+
+      // Now load the full profile
+      const fullProfile = await profileService.getFullProfile(authUser.id);
+      if (fullProfile) {
+        const appProfile = profileService.transformToAppProfile(fullProfile);
+        appProfile.email = authUser.email || '';
+        setUserProfile(appProfile);
+      }
+
+    } catch (error) {
+      console.error('Database error saving new user:', error);
+
+      // Fallback to mock profile if database fails
+      const profile = createMockUserProfile(
+        authUser.email || '',
+        authUser.user_metadata?.full_name || 'Пользователь'
+      );
+      setUserProfile(profile);
+    }
   };
 
   // Initialize auth state and listen to auth changes

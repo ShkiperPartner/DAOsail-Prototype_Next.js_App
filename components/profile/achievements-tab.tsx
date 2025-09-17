@@ -14,7 +14,8 @@ import {
   Star,
   Award,
   Target,
-  Zap
+  Zap,
+  TrendingUp
 } from 'lucide-react';
 import { useAppContext } from '@/lib/contexts/app-context';
 import type { UserAchievement } from '@/lib/types/profile';

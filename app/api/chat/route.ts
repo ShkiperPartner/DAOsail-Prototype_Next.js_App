@@ -7,12 +7,13 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Функция для поиска релевантного контекста
+// Функция для поиска релевантного контекста с учетом роли пользователя
 async function getRelevantContext(
   userMessage: string,
   assistantType: 'navigator' | 'skipper',
+  userRole: string = 'Интересующийся',
   language: 'ru' | 'en' = 'ru'
-): Promise<string> {
+): Promise<{ context: string; chunksUsed: number }> {
   try {
     // Создаем embedding для пользовательского сообщения
     const embeddingResponse = await openai.embeddings.create({
@@ -21,6 +22,20 @@ async function getRelevantContext(
     });
 
     const queryEmbedding = embeddingResponse.data[0].embedding;
+
+    // Определяем доступные роли для пользователя
+    const getAccessibleRoles = (role: string): string[] => {
+      const roleHierarchy: Record<string, string[]> = {
+        'Интересующийся': ['public'],
+        'Пассажир': ['public', 'passenger'],
+        'Матрос': ['public', 'passenger', 'sailor'],
+        'Партнер': ['public', 'passenger', 'sailor', 'partner'],
+        'admin': ['public', 'passenger', 'sailor', 'partner', 'admin']
+      };
+      return roleHierarchy[role] || ['public'];
+    };
+
+    const accessibleRoles = getAccessibleRoles(userRole);
 
     // Определяем категории для каждого типа ассистента
     const categoryMap = {
@@ -31,14 +46,15 @@ async function getRelevantContext(
     const supabase = createClient();
     let allResults: any[] = [];
 
-    // Ищем по релевантным категориям
+    // Ищем по релевантным категориям с фильтрацией по ролям
     for (const category of categoryMap[assistantType]) {
-      const { data } = await supabase.rpc('search_knowledge_documents', {
+      const { data } = await supabase.rpc('search_knowledge_documents_by_role', {
         query_embedding: queryEmbedding,
         match_threshold: 0.7,
         match_count: 2,
         filter_category: category,
-        filter_language: language
+        filter_language: language,
+        accessible_roles: accessibleRoles
       });
 
       if (data && data.length > 0) {
@@ -47,7 +63,7 @@ async function getRelevantContext(
     }
 
     if (allResults.length === 0) {
-      return '';
+      return { context: '', chunksUsed: 0 };
     }
 
     // Убираем дубликаты и сортируем по релевантности
@@ -56,34 +72,38 @@ async function getRelevantContext(
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, 3);
 
-    // Формируем контекст
+    // Формируем контекст с метаданными о уровне доступа
+    const accessLevel = accessibleRoles[accessibleRoles.length - 1];
     const contextParts = uniqueResults.map(doc =>
-      `**${doc.title}**\n${doc.content}`
+      `**${doc.title}** (${doc.knowledge_level || 'basic'}, ${doc.target_audience || 'general'})\n${doc.content}`
     );
 
     const contextHeader = language === 'ru'
-      ? 'Контекст из базы знаний:'
-      : 'Context from knowledge base:';
+      ? `Контекст из базы знаний (уровень доступа: ${accessLevel}):`
+      : `Context from knowledge base (access level: ${accessLevel}):`;
 
-    return `${contextHeader}\n\n${contextParts.join('\n\n---\n\n')}`;
+    return {
+      context: `${contextHeader}\n\n${contextParts.join('\n\n---\n\n')}`,
+      chunksUsed: uniqueResults.length
+    };
 
   } catch (error) {
     console.error('Error getting relevant context:', error);
-    return '';
+    return { context: '', chunksUsed: 0 };
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const { messages, assistantType, userId } = await request.json();
+    const { messages, assistantType, userRole, userId } = await request.json();
 
-    // Проверяем аутентификацию пользователя
+    // Проверяем аутентификацию пользователя (для гостей разрешаем с ограничениями)
     const supabase = createClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    // Для гостей используем базовую роль
+    const effectiveUserRole = user ? userRole || 'Интересующийся' : 'Интересующийся';
+    const isGuest = !user;
 
     // Валидация входных данных
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
@@ -95,12 +115,13 @@ export async function POST(request: NextRequest) {
 
     // Получаем последнее сообщение пользователя для поиска контекста
     const lastUserMessage = messages[messages.length - 1];
-    let relevantContext = '';
+    let contextResult = { context: '', chunksUsed: 0 };
 
     if (lastUserMessage && lastUserMessage.role === 'user') {
-      relevantContext = await getRelevantContext(
+      contextResult = await getRelevantContext(
         lastUserMessage.content,
         assistantType,
+        effectiveUserRole,
         userLanguage
       );
     }
@@ -112,14 +133,14 @@ export async function POST(request: NextRequest) {
         Ты помогаешь пользователям изучать основы парусного спорта, планировать маршруты, понимать погодные условия и навигационные системы.
         Отвечай дружелюбно, используя морскую терминологию где уместно. Всегда давай практичные советы.
 
-        ${relevantContext ? 'ВАЖНО: Используй информацию из базы знаний ниже для более точных ответов, но не ссылайся на неё напрямую. Отвечай естественно, как будто это твои собственные знания.' : ''}
+        ${contextResult.context ? 'ВАЖНО: Используй информацию из базы знаний ниже для более точных ответов, но не ссылайся на неё напрямую. Отвечай естественно, как будто это твои собственные знания.' : ''}
 
         Если не знаешь точного ответа, честно скажи об этом и предложи где можно найти информацию.`,
         en: `You are Navigator DAOsail, an expert in sailing, navigation, and maritime voyages.
         You help users learn sailing basics, plan routes, understand weather conditions and navigation systems.
         Respond in a friendly manner, using maritime terminology where appropriate. Always give practical advice.
 
-        ${relevantContext ? 'IMPORTANT: Use the information from the knowledge base below for more accurate answers, but don\'t reference it directly. Answer naturally as if it\'s your own knowledge.' : ''}
+        ${contextResult.context ? 'IMPORTANT: Use the information from the knowledge base below for more accurate answers, but don\'t reference it directly. Answer naturally as if it\'s your own knowledge.' : ''}
 
         If you don't know the exact answer, be honest about it and suggest where to find the information.`
       },
@@ -128,14 +149,14 @@ export async function POST(request: NextRequest) {
         Ты специализируешься на безопасности на воде, управлении экипажем, принятии решений в сложных ситуациях.
         Отвечай как опытный наставник, делись реальным опытом и практическими советами.
 
-        ${relevantContext ? 'ВАЖНО: Используй информацию из базы знаний ниже для более точных ответов, но не ссылайся на неё напрямую. Отвечай естественно, как будто это твои собственные знания.' : ''}
+        ${contextResult.context ? 'ВАЖНО: Используй информацию из базы знаний ниже для более точных ответов, но не ссылайся на неё напрямую. Отвечай естественно, как будто это твои собственные знания.' : ''}
 
         Всегда подчеркивай важность безопасности и ответственного подхода к парусному спорту.`,
         en: `You are Skipper DAOsail, an experienced captain with years of yacht and crew management experience.
         You specialize in water safety, crew management, and decision-making in challenging situations.
         Respond as an experienced mentor, sharing real experience and practical advice.
 
-        ${relevantContext ? 'IMPORTANT: Use the information from the knowledge base below for more accurate answers, but don\'t reference it directly. Answer naturally as if it\'s your own knowledge.' : ''}
+        ${contextResult.context ? 'IMPORTANT: Use the information from the knowledge base below for more accurate answers, but don\'t reference it directly. Answer naturally as if it\'s your own knowledge.' : ''}
 
         Always emphasize the importance of safety and responsible approach to sailing.`
       }
@@ -146,8 +167,8 @@ export async function POST(request: NextRequest) {
       || baseSystemPrompts.navigator.ru;
 
     // Добавляем контекст, если он найден
-    if (relevantContext) {
-      systemPrompt += `\n\n${relevantContext}`;
+    if (contextResult.context) {
+      systemPrompt += `\n\n${contextResult.context}`;
     }
 
     // Подготавливаем сообщения для OpenAI
@@ -174,24 +195,34 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No response from AI' }, { status: 500 });
     }
 
-    // Подготавливаем ответ
+    // Подготавливаем ответ с метаданными
     const response = {
-      role: 'assistant',
+      role: 'assistant' as const,
       content: aiResponse,
       timestamp: new Date().toISOString(),
       model: 'gpt-4o-mini',
-      assistantType
+      assistantType,
+      metadata: {
+        userRole: effectiveUserRole,
+        knowledgeChunksUsed: contextResult.chunksUsed,
+        accessLevel: effectiveUserRole === 'Интересующийся' ? 'public' :
+                     effectiveUserRole === 'Пассажир' ? 'passenger' :
+                     effectiveUserRole === 'Матрос' ? 'sailor' : 'partner',
+        isGuest
+      }
     };
 
-    // TODO: Сохранить историю чата в Supabase
-
+    // Возвращаем результат с дополнительной информацией
     return NextResponse.json({
       message: response,
       usage: {
         prompt_tokens: completion.usage?.prompt_tokens || 0,
         completion_tokens: completion.usage?.completion_tokens || 0,
         total_tokens: completion.usage?.total_tokens || 0
-      }
+      },
+      knowledgeChunksUsed: contextResult.chunksUsed,
+      userRole: effectiveUserRole,
+      isGuest
     });
 
   } catch (error) {

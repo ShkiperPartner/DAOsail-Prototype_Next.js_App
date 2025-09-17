@@ -44,7 +44,12 @@ export class ProfileService {
       ]);
 
       if (profileResult.error || statsResult.error) {
-        console.error('Profile service error:', profileResult.error || statsResult.error);
+        console.error('Profile service error details:', {
+          profileError: profileResult.error,
+          statsError: statsResult.error,
+          achievementsError: achievementsResult.error,
+          chatsError: chatsResult.error
+        });
         return null;
       }
 

@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { createClient } from '@/lib/supabase/client';
+import type { AccessRole, KnowledgeLevel, TargetAudience } from '@/lib/supabase/types';
 
 export interface KnowledgeDocument {
   id: string;
@@ -9,6 +10,9 @@ export interface KnowledgeDocument {
   source_url?: string;
   category?: string;
   language: string;
+  access_roles: string[];
+  target_audience: string;
+  knowledge_level: string;
   similarity?: number;
 }
 
@@ -31,7 +35,7 @@ export class EmbeddingService {
     });
   }
 
-  // Поиск релевантных документов в базе знаний
+  // Поиск релевантных документов в базе знаний с роль-фильтрацией
   async searchKnowledgeBase(
     query: string,
     options: {
@@ -39,6 +43,9 @@ export class EmbeddingService {
       language?: 'ru' | 'en';
       maxResults?: number;
       threshold?: number;
+      userRole?: AccessRole;
+      knowledgeLevel?: KnowledgeLevel;
+      targetAudience?: TargetAudience;
     } = {}
   ): Promise<SearchResult> {
     try {
@@ -60,7 +67,10 @@ export class EmbeddingService {
           category,
           language,
           maxResults,
-          threshold
+          threshold,
+          userRole: options.userRole,
+          knowledgeLevel: options.knowledgeLevel,
+          targetAudience: options.targetAudience
         }),
       });
 
@@ -208,61 +218,154 @@ export class EmbeddingService {
     }));
   }
 
-  // Получение контекста для ИИ на основе поиска
+  // Получение разрешенных ролей доступа для пользователя
+  getAccessibleRoles(userRole: string): AccessRole[] {
+    const roleHierarchy: Record<string, AccessRole[]> = {
+      'Интересующийся': ['public'],
+      'Пассажир': ['public', 'passenger'],
+      'Матрос': ['public', 'passenger', 'sailor'],
+      'Партнер': ['public', 'passenger', 'sailor', 'partner'],
+      'admin': ['public', 'passenger', 'sailor', 'partner', 'admin']
+    };
+
+    return roleHierarchy[userRole] || ['public'];
+  }
+
+  // Роль-основанный поиск знаний
+  async searchKnowledgeByRole(
+    query: string,
+    userRole: string,
+    options: {
+      assistantType?: 'navigator' | 'skipper';
+      language?: 'ru' | 'en';
+      maxResults?: number;
+    } = {}
+  ): Promise<SearchResult> {
+    const {
+      assistantType = 'navigator',
+      language = 'ru',
+      maxResults = 5
+    } = options;
+
+    // Определяем доступные роли для пользователя
+    const accessibleRoles = this.getAccessibleRoles(userRole);
+    const primaryRole = accessibleRoles[accessibleRoles.length - 1];
+
+    // Определяем категории для ассистента
+    const categoryMap = {
+      navigator: ['sailing_basics', 'navigation', 'weather', 'equipment'],
+      skipper: ['safety', 'crew_management', 'emergency', 'racing']
+    };
+
+    const relevantCategories = categoryMap[assistantType];
+    let allResults: KnowledgeDocument[] = [];
+
+    // Ищем по категориям с учетом роли
+    for (const category of relevantCategories) {
+      const results = await this.searchKnowledgeBase(query, {
+        category,
+        language,
+        maxResults: 2,
+        threshold: 0.7,
+        userRole: primaryRole
+      });
+      allResults.push(...results.documents);
+    }
+
+    // Убираем дубликаты и сортируем
+    allResults = allResults
+      .filter((doc, index, self) => index === self.findIndex(d => d.id === doc.id))
+      .sort((a, b) => (b.similarity || 0) - (a.similarity || 0))
+      .slice(0, maxResults);
+
+    return {
+      documents: allResults,
+      query,
+      totalResults: allResults.length
+    };
+  }
+
+  // Получение контекста для ИИ на основе роли пользователя
   async getContextForAI(
     query: string,
+    userRole: string,
     assistantType: 'navigator' | 'skipper' = 'navigator',
     language: 'ru' | 'en' = 'ru'
   ): Promise<string> {
     try {
-      // Определяем категории для разных типов ассистентов
-      const categoryMap = {
-        navigator: ['sailing_basics', 'navigation', 'weather', 'equipment'],
-        skipper: ['safety', 'crew_management', 'emergency', 'racing']
-      };
+      // Используем роль-основанный поиск
+      const results = await this.searchKnowledgeByRole(query, userRole, {
+        assistantType,
+        language,
+        maxResults: 5
+      });
 
-      const relevantCategories = categoryMap[assistantType];
-      let allResults: KnowledgeDocument[] = [];
-
-      // Ищем по всем релевантным категориям
-      for (const category of relevantCategories) {
-        const results = await this.searchKnowledgeBase(query, {
-          category,
-          language,
-          maxResults: 2,
-          threshold: 0.7
-        });
-        allResults.push(...results.documents);
-      }
-
-      // Убираем дубликаты по ID
-      allResults = allResults.filter((doc, index, self) =>
-        index === self.findIndex(d => d.id === doc.id)
-      );
-
-      // Сортируем по релевантности и берем топ 5
-      allResults = allResults
-        .sort((a, b) => (b.similarity || 0) - (a.similarity || 0))
-        .slice(0, 5);
-
-      if (allResults.length === 0) {
+      if (results.documents.length === 0) {
         return '';
       }
 
-      // Формируем контекст для ИИ
-      const contextParts = allResults.map(doc =>
-        `**${doc.title}**\n${doc.content}`
+      // Формируем контекст для ИИ с указанием уровня доступа
+      const accessibleRoles = this.getAccessibleRoles(userRole);
+      const accessLevel = accessibleRoles[accessibleRoles.length - 1];
+
+      const contextParts = results.documents.map(doc =>
+        `**${doc.title}** (${doc.knowledge_level}, ${doc.target_audience})\n${doc.content}`
       );
 
       const contextHeader = language === 'ru'
-        ? 'Контекст из базы знаний:'
-        : 'Context from knowledge base:';
+        ? `Контекст из базы знаний (уровень доступа: ${accessLevel}):`
+        : `Context from knowledge base (access level: ${accessLevel}):`;
 
       return `${contextHeader}\n\n${contextParts.join('\n\n---\n\n')}`;
 
     } catch (error) {
       console.error('EmbeddingService.getContextForAI error:', error);
       return '';
+    }
+  }
+
+  // Получение статистики доступа к знаниям по роли
+  async getKnowledgeAccessStats(userRole: string): Promise<{
+    total: number;
+    accessible: number;
+    byLevel: Record<string, number>;
+    byAudience: Record<string, number>;
+  }> {
+    try {
+      const accessibleRoles = this.getAccessibleRoles(userRole);
+
+      const { data: totalDocs, error: totalError } = await this.supabase
+        .from('knowledge_documents')
+        .select('knowledge_level, target_audience, access_roles');
+
+      if (totalError || !totalDocs) {
+        return { total: 0, accessible: 0, byLevel: {}, byAudience: {} };
+      }
+
+      const accessibleDocs = totalDocs.filter(doc =>
+        doc.access_roles.some((role: string) => accessibleRoles.includes(role as AccessRole))
+      );
+
+      const byLevel = accessibleDocs.reduce((acc, doc) => {
+        acc[doc.knowledge_level] = (acc[doc.knowledge_level] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+
+      const byAudience = accessibleDocs.reduce((acc, doc) => {
+        acc[doc.target_audience] = (acc[doc.target_audience] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+
+      return {
+        total: totalDocs.length,
+        accessible: accessibleDocs.length,
+        byLevel,
+        byAudience
+      };
+
+    } catch (error) {
+      console.error('EmbeddingService.getKnowledgeAccessStats error:', error);
+      return { total: 0, accessible: 0, byLevel: {}, byAudience: {} };
     }
   }
 }

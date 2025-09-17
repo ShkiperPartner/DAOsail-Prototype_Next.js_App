@@ -29,7 +29,7 @@ export function ChatBox({
   onQuestionProcessed,
   assistantType = 'navigator'
 }: ChatBoxProps) {
-  const { language, decrementResponses, responsesLeft, isAuthenticated, incrementStat } = useAppContext();
+  const { language, decrementResponses, responsesLeft, isAuthenticated, incrementStat, userProfile } = useAppContext();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -41,9 +41,11 @@ export function ChatBox({
   useEffect(() => {
     const initSession = async () => {
       try {
+        const userRole = userProfile?.role || 'Интересующийся';
         const id = await chatService.createChatSession(
           language === 'ru' ? 'Новый чат' : 'New Chat',
-          assistantType
+          assistantType,
+          userRole
         );
         setSessionId(id);
       } catch (error) {
@@ -89,8 +91,10 @@ export function ChatBox({
     setIsTyping(true);
 
     try {
-      // Send to OpenAI API
-      const response = await chatService.sendMessage(newMessages, assistantType);
+      // Send to OpenAI API with user role
+      const userRole = userProfile?.role || 'Интересующийся';
+      const userId = userProfile?.id;
+      const response = await chatService.sendMessage(newMessages, assistantType, userRole, userId);
 
       const aiMessage: ChatMessage = {
         role: 'assistant',
