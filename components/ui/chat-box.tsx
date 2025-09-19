@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { EmailCapture } from '@/components/ui/email-capture';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -29,7 +30,17 @@ export function ChatBox({
   onQuestionProcessed,
   assistantType = 'navigator'
 }: ChatBoxProps) {
-  const { language, decrementResponses, responsesLeft, isAuthenticated, incrementStat, userProfile } = useAppContext();
+  const {
+    language,
+    decrementResponses,
+    responsesLeft,
+    isAuthenticated,
+    incrementStat,
+    userProfile,
+    guestStage,
+    totalQuestionsAsked,
+    captureEmail
+  } = useAppContext();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -290,6 +301,37 @@ export function ChatBox({
             )}
           </div>
         </ScrollArea>
+
+        {/* Guest Flow: Email Capture or Registration */}
+        {!isAuthenticated && totalQuestionsAsked === 3 && guestStage === 'initial' && (
+          <div className="px-4 py-3 border-t">
+            <EmailCapture
+              onSkip={() => {
+                // Пользователь выбрал "Позже" - продолжаем к этапу 2
+              }}
+            />
+          </div>
+        )}
+
+        {!isAuthenticated && guestStage === 'registration_required' && (
+          <div className="px-4 py-3 border-t">
+            <div className="text-center p-6 border rounded-lg bg-gradient-to-br from-orange-50 to-red-50 dark:from-orange-950/30 dark:to-red-950/30">
+              <AlertCircle className="w-8 h-8 mx-auto mb-4 text-orange-600" />
+              <h3 className="text-lg font-semibold mb-2">
+                {language === 'ru' ? 'Требуется регистрация' : 'Registration Required'}
+              </h3>
+              <p className="text-gray-600 dark:text-gray-300 mb-4">
+                {language === 'ru'
+                  ? 'Если вас действительно интересует проект, зарегистрируйтесь, ибо для избежания спама я больше не смогу отвечать на ваши вопросы.'
+                  : 'If you\'re really interested in the project, please register, as I can no longer answer your questions to avoid spam.'
+                }
+              </p>
+              <Button className="w-full">
+                {language === 'ru' ? 'Зарегистрироваться' : 'Register'}
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Error message */}
         {error && (

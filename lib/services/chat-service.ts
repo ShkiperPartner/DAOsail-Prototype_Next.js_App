@@ -48,6 +48,14 @@ export class ChatService {
     userId?: string
   ): Promise<ChatResponse> {
     try {
+      console.log('Sending chat message:', {
+        messagesCount: messages.length,
+        assistantType,
+        userRole,
+        userId,
+        lastMessage: messages[messages.length - 1]?.content?.substring(0, 100)
+      });
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -65,8 +73,24 @@ export class ChatService {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(errorData.error || `HTTP ${response.status}`);
+        console.error('Chat API response not ok:', {
+          status: response.status,
+          statusText: response.statusText,
+          url: response.url
+        });
+
+        let errorData;
+        try {
+          errorData = await response.json();
+          console.error('Chat API error data:', errorData);
+        } catch (parseError) {
+          console.error('Failed to parse error response:', parseError);
+          const responseText = await response.text().catch(() => 'Could not read response text');
+          console.error('Raw response:', responseText);
+          errorData = { error: `HTTP ${response.status}: ${response.statusText}` };
+        }
+
+        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json();

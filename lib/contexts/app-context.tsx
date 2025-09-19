@@ -14,6 +14,11 @@ interface AppContextType {
   language: 'en' | 'ru';
   responsesLeft: number;
 
+  // Guest Flow
+  guestStage: 'initial' | 'email_captured' | 'registration_required';
+  emailCaptured: boolean;
+  totalQuestionsAsked: number;
+
   // Authentication
   user: User | null;
   isAuthenticated: boolean;
@@ -27,6 +32,7 @@ interface AppContextType {
   toggleLanguage: () => void;
   decrementResponses: () => void;
   resetResponses: () => void;
+  captureEmail: (email: string) => Promise<void>;
 
   // Authentication methods
   signOut: () => Promise<void>;
@@ -47,6 +53,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguage] = useState<'en' | 'ru'>('en');
   const [responsesLeft, setResponsesLeft] = useState(3);
 
+  // Guest Flow state
+  const [guestStage, setGuestStage] = useState<'initial' | 'email_captured' | 'registration_required'>('initial');
+  const [emailCaptured, setEmailCaptured] = useState(false);
+  const [totalQuestionsAsked, setTotalQuestionsAsked] = useState(0);
+
   // Authentication state
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -59,6 +70,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Helper functions
   const resetResponses = () => {
     setResponsesLeft(3);
+    setTotalQuestionsAsked(0);
+    setGuestStage('initial');
+    setEmailCaptured(false);
+  };
+
+  const captureEmail = async (email: string) => {
+    try {
+      const supabase = createClient();
+
+      // Сохраняем email для лид-генерации
+      const { error } = await supabase
+        .from('email_leads')
+        .insert({
+          email,
+          source: 'chat_guest',
+          created_at: new Date().toISOString()
+        });
+
+      if (error) {
+        console.error('Error saving email lead:', error);
+        // Не блокируем UX из-за ошибки сохранения
+      }
+
+      // Обновляем состояние независимо от результата сохранения
+      setEmailCaptured(true);
+      setGuestStage('email_captured');
+      setResponsesLeft(3); // Даем еще 3 вопроса
+
+    } catch (error) {
+      console.error('Error in captureEmail:', error);
+      // Обновляем состояние даже при ошибке
+      setEmailCaptured(true);
+      setGuestStage('email_captured');
+      setResponsesLeft(3);
+    }
   };
 
   // Load profile from Supabase
@@ -300,6 +346,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const decrementResponses = () => {
     setResponsesLeft(prev => Math.max(0, prev - 1));
+
+    // Обновляем стадию гостевого режима
+    if (!isAuthenticated) {
+      const newTotal = totalQuestionsAsked + 1;
+      setTotalQuestionsAsked(newTotal);
+
+      if (newTotal === 3 && !emailCaptured) {
+        // После 3-го вопроса без email - предлагаем захват email
+        setGuestStage('initial');
+      } else if (newTotal === 6) {
+        // После 6-го вопроса - требуем регистрацию
+        setGuestStage('registration_required');
+        setResponsesLeft(0); // Блокируем дальнейшие вопросы
+      }
+    } else {
+      setTotalQuestionsAsked(prev => prev + 1);
+    }
   };
 
   // Authentication methods
@@ -471,6 +534,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       language,
       responsesLeft,
 
+      // Guest Flow
+      guestStage,
+      emailCaptured,
+      totalQuestionsAsked,
+
       // Authentication
       user,
       isAuthenticated,
@@ -484,6 +552,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       toggleLanguage,
       decrementResponses,
       resetResponses,
+      captureEmail,
 
       // Authentication methods
       signOut,
