@@ -77,21 +77,27 @@ export function AssistantDock({ className }: AssistantDockProps) {
   }, [lastScrollY]);
 
   const handleAssistantClick = async (assistant: Assistant) => {
-    // Don't save context if already on chat page
-    if (!pathname.includes('/chat')) {
-      const currentTitle = document.title || 'DAOsail';
-      const section = pathname.split('/')[1] || 'home';
+    try {
+      // Don't save context if already on chat page
+      if (!pathname.includes('/chat')) {
+        const currentTitle = document.title || 'DAOsail';
+        const section = pathname.split('/')[1] || 'home';
 
-      await saveNavigationContext(
-        pathname,
-        currentTitle,
-        section,
-        'page'
-      );
+        await saveNavigationContext(
+          pathname,
+          currentTitle,
+          section,
+          'page'
+        );
+      }
+
+      // Navigate to chat with selected assistant
+      router.push(`/chat?assistant=${assistant.id}`);
+    } catch (error) {
+      console.error('Error in handleAssistantClick:', error);
+      // Fallback navigation
+      router.push(`/chat?assistant=${assistant.id}`);
     }
-
-    // Navigate to chat with selected assistant
-    router.push(`/chat?assistant=${assistant.id}`);
   };
 
   const toggleExpanded = () => {

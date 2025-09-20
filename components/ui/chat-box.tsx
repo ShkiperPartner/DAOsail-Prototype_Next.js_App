@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useAppContext } from '@/lib/contexts/app-context';
 import { chatService, ChatMessage } from '@/lib/services/chat-service';
+import { useRouter } from 'next/navigation';
 
 interface ChatBoxProps {
   newQuestion?: string;
@@ -33,6 +34,7 @@ export function ChatBox({
   onQuestionProcessed,
   assistantType = 'navigator'
 }: ChatBoxProps) {
+  const router = useRouter();
   const {
     language,
     decrementResponses,
@@ -210,10 +212,10 @@ export function ChatBox({
   const handleBackClick = () => {
     const backUrl = getBackUrl();
     if (backUrl) {
-      window.location.href = backUrl;
+      router.push(backUrl);
     } else {
       // Fallback to main page
-      window.location.href = '/';
+      router.push('/');
     }
   };
 

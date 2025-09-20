@@ -606,26 +606,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         contentId
       };
 
-      // Save to Supabase
-      const { error } = await supabase
-        .from('navigation_history')
-        .insert({
-          user_id: user.id,
-          previous_url: url,
-          previous_title: title,
-          current_url: window.location.pathname,
-          section,
-          content_type: contentType,
-          content_id: contentId,
-          scroll_position: window.scrollY,
-          viewport_width: window.innerWidth,
-          viewport_height: window.innerHeight,
-          user_agent: navigator.userAgent,
-          session_id: `session_${Date.now()}`
-        });
+      // Save to Supabase (check if we're in browser)
+      if (typeof window !== 'undefined') {
+        const { error } = await supabase
+          .from('navigation_history')
+          .insert({
+            user_id: user.id,
+            previous_url: url,
+            previous_title: title,
+            current_url: window.location.pathname,
+            section,
+            content_type: contentType,
+            content_id: contentId,
+            scroll_position: window.scrollY || 0,
+            viewport_width: window.innerWidth || 0,
+            viewport_height: window.innerHeight || 0,
+            user_agent: navigator.userAgent || '',
+            session_id: `session_${Date.now()}`
+          });
 
-      if (error) {
-        console.error('Error saving navigation context:', error);
+        if (error) {
+          console.error('Error saving navigation context:', error);
+        }
       }
 
       // Update local state
