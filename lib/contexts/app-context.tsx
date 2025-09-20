@@ -8,6 +8,25 @@ import type { User } from '@supabase/supabase-js';
 import type { UserProfile } from '@/lib/types/profile';
 import { createMockUserProfile } from '@/data/mock-profile';
 
+interface NavigationEntry {
+  url: string;
+  title: string;
+  timestamp: number;
+  section?: string;
+  contentType?: string;
+  contentId?: string;
+}
+
+interface ChatSearchResult {
+  chatSessionId: string;
+  chatTitle: string;
+  messageContent: string;
+  messageRole: 'user' | 'assistant';
+  assistantType?: 'navigator' | 'skipper';
+  createdAt: string;
+  rank: number;
+}
+
 interface AppContextType {
   // Theme & Language
   theme: 'light' | 'dark';
@@ -27,6 +46,14 @@ interface AppContextType {
   // Profile
   userProfile: UserProfile | null;
 
+  // Navigation Context
+  navigationHistory: NavigationEntry[];
+  currentNavigation: NavigationEntry | null;
+
+  // Chat Search
+  chatSearchResults: ChatSearchResult[];
+  isSearching: boolean;
+
   // Theme & Language methods
   toggleTheme: () => void;
   toggleLanguage: () => void;
@@ -43,6 +70,15 @@ interface AppContextType {
   incrementStat: (stat: keyof UserProfile['stats']) => Promise<void>;
   uploadAvatar: (file: File) => Promise<string | null>;
   loadProfile: () => Promise<void>;
+
+  // Navigation methods
+  saveNavigationContext: (url: string, title: string, section?: string, contentType?: string, contentId?: string) => Promise<void>;
+  getBackUrl: () => string | null;
+  clearNavigationHistory: () => void;
+
+  // Chat search methods
+  searchChats: (query: string) => Promise<void>;
+  clearChatSearch: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -66,6 +102,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Profile state
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
+
+  // Navigation state
+  const [navigationHistory, setNavigationHistory] = useState<NavigationEntry[]>([]);
+  const [currentNavigation, setCurrentNavigation] = useState<NavigationEntry | null>(null);
+
+  // Chat search state
+  const [chatSearchResults, setChatSearchResults] = useState<ChatSearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
   // Helper functions
   const resetResponses = () => {
@@ -527,6 +571,130 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Navigation methods
+  const saveNavigationContext = async (
+    url: string,
+    title: string,
+    section?: string,
+    contentType?: string,
+    contentId?: string
+  ) => {
+    if (!user) {
+      // For guests, save only in memory
+      const entry: NavigationEntry = {
+        url,
+        title,
+        timestamp: Date.now(),
+        section,
+        contentType,
+        contentId
+      };
+      setNavigationHistory(prev => [entry, ...prev.slice(0, 9)]); // Keep last 10
+      setCurrentNavigation(entry);
+      return;
+    }
+
+    try {
+      const supabase = createClient();
+
+      const entry: NavigationEntry = {
+        url,
+        title,
+        timestamp: Date.now(),
+        section,
+        contentType,
+        contentId
+      };
+
+      // Save to Supabase
+      const { error } = await supabase
+        .from('navigation_history')
+        .insert({
+          user_id: user.id,
+          previous_url: url,
+          previous_title: title,
+          current_url: window.location.pathname,
+          section,
+          content_type: contentType,
+          content_id: contentId,
+          scroll_position: window.scrollY,
+          viewport_width: window.innerWidth,
+          viewport_height: window.innerHeight,
+          user_agent: navigator.userAgent,
+          session_id: `session_${Date.now()}`
+        });
+
+      if (error) {
+        console.error('Error saving navigation context:', error);
+      }
+
+      // Update local state
+      setNavigationHistory(prev => [entry, ...prev.slice(0, 9)]);
+      setCurrentNavigation(entry);
+
+    } catch (error) {
+      console.error('Error in saveNavigationContext:', error);
+    }
+  };
+
+  const getBackUrl = (): string | null => {
+    if (navigationHistory.length > 0) {
+      return navigationHistory[0].url;
+    }
+    return null;
+  };
+
+  const clearNavigationHistory = () => {
+    setNavigationHistory([]);
+    setCurrentNavigation(null);
+  };
+
+  // Chat search methods
+  const searchChats = async (query: string) => {
+    if (!user || !query.trim()) {
+      setChatSearchResults([]);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const supabase = createClient();
+
+      // Call the search function we created
+      const { data, error } = await supabase.rpc('search_user_chats', {
+        search_query: query.trim(),
+        user_uuid: user.id,
+        limit_count: 20
+      });
+
+      if (error) {
+        console.error('Search error:', error);
+        setChatSearchResults([]);
+      } else {
+        const results: ChatSearchResult[] = (data || []).map((item: any) => ({
+          chatSessionId: item.chat_session_id,
+          chatTitle: item.chat_title || 'Untitled Chat',
+          messageContent: item.message_content,
+          messageRole: item.message_role,
+          assistantType: item.assistant_type,
+          createdAt: item.created_at,
+          rank: item.rank
+        }));
+        setChatSearchResults(results);
+      }
+    } catch (error) {
+      console.error('Error searching chats:', error);
+      setChatSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const clearChatSearch = () => {
+    setChatSearchResults([]);
+    setIsSearching(false);
+  };
+
   return (
     <AppContext.Provider value={{
       // Theme & Language
@@ -547,6 +715,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // Profile
       userProfile,
 
+      // Navigation Context
+      navigationHistory,
+      currentNavigation,
+
+      // Chat Search
+      chatSearchResults,
+      isSearching,
+
       // Theme & Language methods
       toggleTheme,
       toggleLanguage,
@@ -563,6 +739,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       incrementStat,
       uploadAvatar,
       loadProfile,
+
+      // Navigation methods
+      saveNavigationContext,
+      getBackUrl,
+      clearNavigationHistory,
+
+      // Chat search methods
+      searchChats,
+      clearChatSearch,
     }}>
       {children}
     </AppContext.Provider>

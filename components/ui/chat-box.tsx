@@ -14,7 +14,10 @@ import {
   User,
   AlertCircle,
   Anchor,
-  Navigation
+  Navigation,
+  ArrowLeft,
+  Search,
+  X
 } from 'lucide-react';
 import { useAppContext } from '@/lib/contexts/app-context';
 import { chatService, ChatMessage } from '@/lib/services/chat-service';
@@ -39,13 +42,20 @@ export function ChatBox({
     userProfile,
     guestStage,
     totalQuestionsAsked,
-    captureEmail
+    captureEmail,
+    getBackUrl,
+    searchChats,
+    chatSearchResults,
+    isSearching,
+    clearChatSearch
   } = useAppContext();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string>('');
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   // Initialize session
@@ -196,20 +206,138 @@ export function ChatBox({
 
   const assistantInfo = getAssistantInfo();
 
+  // Navigation functions
+  const handleBackClick = () => {
+    const backUrl = getBackUrl();
+    if (backUrl) {
+      window.location.href = backUrl;
+    } else {
+      // Fallback to main page
+      window.location.href = '/';
+    }
+  };
+
+  // Search functions
+  const handleSearchSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchQuery.trim()) {
+      await searchChats(searchQuery);
+    }
+  };
+
+  const toggleSearch = () => {
+    setShowSearch(!showSearch);
+    if (showSearch) {
+      clearChatSearch();
+      setSearchQuery('');
+    }
+  };
+
+  const handleSearchResultClick = (result: any) => {
+    // Navigate to the specific chat session
+    // For now, just show a snippet in the current chat
+    setInput(`Ранее вы спрашивали: "${result.messageContent}"`);
+    setShowSearch(false);
+    clearChatSearch();
+    setSearchQuery('');
+  };
+
   return (
     <Card className="flex flex-col h-[600px]">
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2">
-          <div className={`p-2 rounded-full ${assistantInfo.bgColor} text-white`}>
-            {assistantInfo.icon}
+        <CardTitle className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {/* Back button */}
+            {getBackUrl() && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleBackClick}
+                className="mr-2 p-2"
+                title={language === 'ru' ? 'Вернуться назад' : 'Go back'}
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+            )}
+
+            <div className={`p-2 rounded-full ${assistantInfo.bgColor} text-white`}>
+              {assistantInfo.icon}
+            </div>
+            <div className="flex flex-col">
+              <span className="text-lg">{assistantInfo.title}</span>
+              <span className="text-sm font-normal text-muted-foreground">
+                {language === 'ru' ? 'ИИ-консультант' : 'AI Assistant'}
+              </span>
+            </div>
           </div>
-          <div className="flex flex-col">
-            <span className="text-lg">{assistantInfo.title}</span>
-            <span className="text-sm font-normal text-muted-foreground">
-              {language === 'ru' ? 'ИИ-консультант' : 'AI Assistant'}
-            </span>
+
+          {/* Action buttons */}
+          <div className="flex items-center gap-2">
+            {isAuthenticated && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={toggleSearch}
+                className="p-2"
+                title={language === 'ru' ? 'Поиск по чатам' : 'Search chats'}
+              >
+                {showSearch ? <X className="h-4 w-4" /> : <Search className="h-4 w-4" />}
+              </Button>
+            )}
           </div>
         </CardTitle>
+
+        {/* Search interface */}
+        {showSearch && isAuthenticated && (
+          <div className="mt-3 space-y-3">
+            <form onSubmit={handleSearchSubmit} className="flex gap-2">
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={language === 'ru' ? 'Поиск по истории чатов...' : 'Search chat history...'}
+                className="flex-1"
+              />
+              <Button type="submit" disabled={isSearching} size="sm">
+                {isSearching ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Search className="h-4 w-4" />
+                )}
+              </Button>
+            </form>
+
+            {/* Search results */}
+            {chatSearchResults.length > 0 && (
+              <div className="max-h-32 overflow-y-auto space-y-1">
+                {chatSearchResults.slice(0, 5).map((result, index) => (
+                  <div
+                    key={index}
+                    onClick={() => handleSearchResultClick(result)}
+                    className="p-2 text-sm bg-muted/50 rounded cursor-pointer hover:bg-muted transition-colors"
+                  >
+                    <div className="font-medium text-xs text-muted-foreground mb-1">
+                      {result.chatTitle}
+                    </div>
+                    <div className="line-clamp-2">
+                      {result.messageContent}
+                    </div>
+                  </div>
+                ))}
+                {chatSearchResults.length > 5 && (
+                  <div className="text-xs text-muted-foreground text-center py-1">
+                    +{chatSearchResults.length - 5} {language === 'ru' ? 'еще результатов' : 'more results'}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {searchQuery && chatSearchResults.length === 0 && !isSearching && (
+              <div className="text-sm text-muted-foreground text-center py-2">
+                {language === 'ru' ? 'Ничего не найдено' : 'No results found'}
+              </div>
+            )}
+          </div>
+        )}
       </CardHeader>
       
       <CardContent className="flex-1 flex flex-col p-0">

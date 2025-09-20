@@ -3,6 +3,7 @@ import { LeftSidebar } from '@/components/layout/left-sidebar';
 import { RightSidebar } from '@/components/layout/right-sidebar';
 import { Footer } from '@/components/layout/footer';
 import { MobileDrawer } from '@/components/layout/mobile-drawer';
+import { AssistantDock } from '@/components/ui/assistant-dock';
 
 export default function MainLayout({
   children,
@@ -34,6 +35,9 @@ export default function MainLayout({
         </div>
       </div>
       <Footer />
+
+      {/* Assistant Dock - Always visible on all pages except chat */}
+      <AssistantDock />
     </div>
   );
 }
