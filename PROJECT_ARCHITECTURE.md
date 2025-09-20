@@ -1,9 +1,9 @@
 # Project Architecture Overview
 
 **Проект:** DAOsail Prototype - Next.js App
-**Версия:** 0.5.0
-**Дата обновления:** 2025-01-17
-**Статус:** Активная разработка - Phase 5.0 завершена (Guest Flow + Email Capture)
+**Версия:** 0.6.0
+**Дата обновления:** 2025-01-20
+**Статус:** Активная разработка - Phase 6.0 завершена (Navigation Context + Chat Search)
 
 ---
 
@@ -206,9 +206,11 @@ interface AppContextType {
 **Назначение:** Переиспользуемые UI компоненты на базе Radix UI  
 **Ключевые компоненты:**
 - `HeroCard` → главная карточка с градиентами и анимациями
-- `ChatBox` → интерфейс чата с mock AI responses
+- `ChatBox` → полнофункциональный чат с OpenAI API + поиск + кнопка "Назад"
 - `QuickQuestions` → быстрые вопросы для начала диалога
 - `SoftGateBanner` → баннер с ограничениями для гостей
+- `EmailCapture` → форма сбора email для гостевого режима
+- `AssistantDock` → плавающая панель быстрого доступа к ассистентам
 
 **Паттерны:**
 ```typescript
@@ -432,6 +434,16 @@ User Click → Next.js Link →
 - [x] **Email Capture компонент** - Красивая форма для сбора контактов
 - [x] **Умные лимиты** - Soft limit (3 вопроса) и hard limit (6 вопросов)
 - [x] **AppContext расширен** - Новые состояния для гостевого режима (guestStage, emailCaptured, totalQuestionsAsked)
+
+**Phase 6: Navigation Context & Chat Search (Завершена v0.6.0)**
+- [x] **SQL миграции** - Таблицы navigation_history, chat_sessions, chat_search_index
+- [x] **Navigation History** - Отслеживание переходов пользователя для умной кнопки "Назад"
+- [x] **Full-text Search** - Поиск по содержимому чатов с PostgreSQL FTS (русский + английский)
+- [x] **AssistantDock** - Адаптивная плавающая панель с доступом к ассистентам
+- [x] **Smart Back Button** - Точный возврат на исходную страницу из чата
+- [x] **Mobile UX** - Dock скрывается при скролле, экспандится по тапу
+- [x] **Supabase Functions** - search_user_chats(), get_user_navigation_context()
+- [x] **AppContext Navigation** - Методы сохранения и восстановления контекста навигации
 - [x] **ChatBox интеграция** - Автоматический показ форм в нужный момент
 - [x] **Обновленные промпты** - Ограничение эмоджи до 1 на ответ
 - [x] **Lead generation готовность** - Структура для сохранения email в Supabase
@@ -491,7 +503,26 @@ user_achievements (id, user_id, achievement_id, title, title_ru, description, de
 -- История чатов
 user_chats (id, user_id, title, assistant_type, main_topic, messages_count, last_activity, timestamps)
 
--- База знаний с vector embeddings (NEW!)
+-- Навигационный контекст (NEW v0.6.0!)
+navigation_history (
+  id, user_id, previous_url, previous_title, current_url,
+  section, content_type, content_id, scroll_position,
+  viewport_width, viewport_height, user_agent, session_id, timestamps
+)
+
+-- Сессии чатов (NEW v0.6.0!)
+chat_sessions (
+  id, user_id, title, assistant_type, timestamps
+)
+
+-- Поисковый индекс чатов (NEW v0.6.0!)
+chat_search_index (
+  id, user_id, chat_session_id, message_id, message_content,
+  message_role, assistant_type, chat_title,
+  search_vector tsvector, timestamps
+)
+
+-- База знаний с vector embeddings
 knowledge_documents (
   id, title, content, source_type, source_url, file_path,
   language, category, embedding vector(1536), timestamps
@@ -504,6 +535,13 @@ knowledge_documents (
 - **Search function** search_knowledge_documents() с настраиваемым порогом similarity
 - **Categories** sailing_basics, navigation, safety, weather, equipment, racing, etc.
 - **Languages** поддержка ru/en контента
+
+### Navigation & Chat Search Functions (NEW v0.6.0)
+- **search_user_chats()** полнотекстовый поиск по чатам с ранжированием
+- **get_user_navigation_context()** получение последнего контекста навигации
+- **Full-text search** PostgreSQL FTS с поддержкой русского и английского
+- **Автоматическая индексация** сообщений чата в search_vector
+- **RLS policies** строгая безопасность на уровне строк
 
 ### Storage Buckets
 - **avatars** - Аватары пользователей с RLS политиками
