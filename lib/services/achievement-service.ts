@@ -21,7 +21,7 @@ const ACHIEVEMENT_TEMPLATES: AchievementTemplate[] = [
     description: 'Asked your first question to the AI consultant',
     descriptionRu: 'Задал первый вопрос ИИ-консультанту',
     iconName: 'MessageSquare',
-    category: 'engagement',
+    category: 'progress',
     checkCondition: (profile) => profile.stats.questionsAsked >= 1
   },
   {
@@ -31,7 +31,7 @@ const ACHIEVEMENT_TEMPLATES: AchievementTemplate[] = [
     description: 'Asked 10 questions to learn more about sailing',
     descriptionRu: 'Задал 10 вопросов, изучая парусный спорт',
     iconName: 'Compass',
-    category: 'engagement',
+    category: 'progress',
     checkCondition: (profile) => profile.stats.questionsAsked >= 10
   },
   {
@@ -41,7 +41,7 @@ const ACHIEVEMENT_TEMPLATES: AchievementTemplate[] = [
     description: 'Asked 25 questions - your curiosity knows no bounds!',
     descriptionRu: 'Задал 25 вопросов - твоему любопытству нет границ!',
     iconName: 'Brain',
-    category: 'engagement',
+    category: 'progress',
     checkCondition: (profile) => profile.stats.questionsAsked >= 25
   },
   {
@@ -81,7 +81,7 @@ const ACHIEVEMENT_TEMPLATES: AchievementTemplate[] = [
     description: 'Participated in community discussions',
     descriptionRu: 'Принял участие в обсуждениях сообщества',
     iconName: 'Users',
-    category: 'social',
+    category: 'community',
     checkCondition: (profile) => profile.stats.communityMessages >= 1
   },
   {
@@ -91,7 +91,7 @@ const ACHIEVEMENT_TEMPLATES: AchievementTemplate[] = [
     description: 'Posted 10 messages in community discussions',
     descriptionRu: 'Написал 10 сообщений в обсуждениях сообщества',
     iconName: 'MessageCircle',
-    category: 'social',
+    category: 'community',
     checkCondition: (profile) => profile.stats.communityMessages >= 10
   },
   {
@@ -115,7 +115,7 @@ const ACHIEVEMENT_TEMPLATES: AchievementTemplate[] = [
     description: 'Logged in for 7 consecutive days',
     descriptionRu: 'Заходил в систему 7 дней подряд',
     iconName: 'Calendar',
-    category: 'engagement',
+    category: 'progress',
     checkCondition: (profile) => profile.stats.totalLogins >= 7
   },
   {

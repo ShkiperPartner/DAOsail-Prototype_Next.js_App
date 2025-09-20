@@ -43,7 +43,7 @@ async function getRelevantContext(
       skipper: ['safety', 'crew_management', 'emergency', 'racing']
     };
 
-    const supabase = createClient();
+    const supabase = await createClient();
     let allResults: any[] = [];
 
     // Ищем по релевантным категориям с фильтрацией по ролям
@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
     const { messages, assistantType, userRole, userId } = await request.json();
 
     // Проверяем аутентификацию пользователя (для гостей разрешаем с ограничениями)
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
     // Для гостей используем базовую роль

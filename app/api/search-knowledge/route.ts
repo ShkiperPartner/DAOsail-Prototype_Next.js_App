@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     const queryEmbedding = embeddingResponse.data[0].embedding;
 
     // Инициализируем Supabase
-    const supabase = createClient();
+    const supabase = await createClient();
 
     // Выполняем поиск похожих документов
     const { data, error } = await supabase.rpc('search_knowledge_documents', {
@@ -100,7 +100,7 @@ export async function GET(request: NextRequest) {
     const category = searchParams.get('category');
     const language = searchParams.get('language') || 'ru';
 
-    const supabase = createClient();
+    const supabase = await createClient();
 
     let query = supabase
       .from('knowledge_documents')

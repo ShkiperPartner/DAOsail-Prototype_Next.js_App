@@ -196,6 +196,11 @@ export class ProfileService {
         });
 
       if (error) {
+        // Игнорируем ошибку дублирования (409 Conflict)
+        if (error.code === '23505' || error.message?.includes('duplicate')) {
+          console.log('Achievement already exists, skipping...');
+          return true; // Считаем успешным, так как достижение уже есть
+        }
         console.error('Error adding achievement:', error);
         return false;
       }
