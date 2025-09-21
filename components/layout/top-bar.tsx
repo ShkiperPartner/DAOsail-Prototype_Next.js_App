@@ -18,7 +18,7 @@ import { useAppContext } from '@/lib/contexts/app-context';
 
 export function TopBar() {
   const router = useRouter();
-  const { theme, language, toggleTheme, toggleLanguage, user, isAuthenticated, signOut } = useAppContext();
+  const { theme, language, toggleTheme, toggleLanguage, user, isAuthenticated, signOut, resetAppState } = useAppContext();
 
   const handleLogin = () => {
     router.push('/login');
@@ -37,13 +37,20 @@ export function TopBar() {
     }
   };
 
+  const handleLogoClick = () => {
+    resetAppState();
+    router.push('/');
+  };
+
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-16 items-center justify-between px-4">
         {/* Logo */}
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-2 cursor-pointer hover:opacity-80 transition-opacity" onClick={handleLogoClick}>
           <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-brand to-primary flex items-center justify-center">
-            <span className="text-white font-bold text-sm">DS</span>
+            <span className="text-white font-bold text-sm" suppressHydrationWarning>
+              {language === 'ru' ? 'ДС' : 'DS'}
+            </span>
           </div>
           <span className="font-bold text-xl bg-gradient-to-r from-brand to-primary bg-clip-text text-transparent">
             DAOsail

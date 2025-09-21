@@ -22,17 +22,20 @@ import {
 import { useAppContext } from '@/lib/contexts/app-context';
 import { chatService, ChatMessage } from '@/lib/services/chat-service';
 import { useRouter } from 'next/navigation';
+import { AssistantType, getAssistant } from '@/lib/types/assistants';
 
 interface ChatBoxProps {
   newQuestion?: string;
   onQuestionProcessed?: () => void;
-  assistantType?: 'navigator' | 'skipper';
+  assistantType?: AssistantType;
+  onChangeAssistant?: () => void;
 }
 
 export function ChatBox({
   newQuestion,
   onQuestionProcessed,
-  assistantType = 'navigator'
+  assistantType = 'navigator',
+  onChangeAssistant
 }: ChatBoxProps) {
   const router = useRouter();
   const {
@@ -192,17 +195,26 @@ export function ChatBox({
 
   // Get assistant icon and title
   const getAssistantInfo = () => {
-    if (assistantType === 'skipper') {
+    const assistant = getAssistant(assistantType);
+
+    if (assistant) {
+      const Icon = assistant.icon;
       return {
-        icon: <Anchor className="h-4 w-4" />,
-        title: language === 'ru' ? 'Шкипер' : 'Skipper',
-        bgColor: 'bg-orange-500'
+        icon: <Icon className="h-4 w-4" />,
+        title: language === 'ru' ? assistant.titleRu : assistant.title,
+        role: language === 'ru' ? assistant.roleRu : assistant.role,
+        bgColor: `bg-gradient-to-br ${assistant.color}`,
+        description: language === 'ru' ? assistant.descriptionRu : assistant.description
       };
     }
+
+    // Fallback for unknown assistant types
     return {
       icon: <Navigation className="h-4 w-4" />,
       title: language === 'ru' ? 'Навигатор' : 'Navigator',
-      bgColor: 'bg-blue-500'
+      role: language === 'ru' ? 'Навигатор' : 'Navigator',
+      bgColor: 'bg-gradient-to-br from-blue-500 to-cyan-500',
+      description: language === 'ru' ? 'Общий помощник' : 'General assistant'
     };
   };
 
@@ -262,19 +274,30 @@ export function ChatBox({
               </Button>
             )}
 
-            <div className={`p-2 rounded-full ${assistantInfo.bgColor} text-white`}>
+            <div className={`p-2 rounded-full ${assistantInfo.bgColor} text-white shadow-lg`}>
               {assistantInfo.icon}
             </div>
             <div className="flex flex-col">
               <span className="text-lg">{assistantInfo.title}</span>
               <span className="text-sm font-normal text-muted-foreground">
-                {language === 'ru' ? 'ИИ-консультант' : 'AI Assistant'}
+                {assistantInfo.role}
               </span>
             </div>
           </div>
 
           {/* Action buttons */}
           <div className="flex items-center gap-2">
+            {onChangeAssistant && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onChangeAssistant}
+                className="p-2"
+                title={language === 'ru' ? 'Сменить ассистента' : 'Change assistant'}
+              >
+                <Bot className="h-4 w-4" />
+              </Button>
+            )}
             {isAuthenticated && (
               <Button
                 variant="ghost"

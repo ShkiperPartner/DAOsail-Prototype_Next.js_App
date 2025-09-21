@@ -79,6 +79,9 @@ interface AppContextType {
   // Chat search methods
   searchChats: (query: string) => Promise<void>;
   clearChatSearch: () => void;
+
+  // App reset method
+  resetAppState: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -697,6 +700,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setIsSearching(false);
   };
 
+  // App reset method - полный сброс состояния приложения
+  const resetAppState = () => {
+    // Сброс guest flow состояний
+    setGuestStage('initial');
+    setEmailCaptured(false);
+    setTotalQuestionsAsked(0);
+    setResponsesLeft(3);
+
+    // Сброс навигации
+    clearNavigationHistory();
+
+    // Сброс поиска
+    clearChatSearch();
+
+    // Очистка localStorage для гостевых настроек
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('guestStage');
+      localStorage.removeItem('emailCaptured');
+      localStorage.removeItem('totalQuestionsAsked');
+      localStorage.removeItem('responsesLeft');
+    }
+
+    console.log('App state reset to initial values');
+  };
+
   return (
     <AppContext.Provider value={{
       // Theme & Language
@@ -750,6 +778,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // Chat search methods
       searchChats,
       clearChatSearch,
+
+      // App reset method
+      resetAppState,
     }}>
       {children}
     </AppContext.Provider>
