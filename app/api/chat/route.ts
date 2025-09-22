@@ -95,7 +95,7 @@ async function getRelevantContext(
 
 export async function POST(request: NextRequest) {
   try {
-    const { messages, assistantType, userRole, userId } = await request.json();
+    const { messages, assistantType, userRole, userId, filesContext } = await request.json();
 
     // Проверяем аутентификацию пользователя (для гостей разрешаем с ограничениями)
     const supabase = await createClient();
@@ -171,6 +171,11 @@ export async function POST(request: NextRequest) {
       systemPrompt += `\n\n${contextResult.context}`;
     }
 
+    // Добавляем контекст файлов, если есть
+    if (filesContext && filesContext.trim()) {
+      systemPrompt += `\n\n${filesContext}`;
+    }
+
     // Подготавливаем сообщения для OpenAI
     const openaiMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt },
@@ -180,50 +185,158 @@ export async function POST(request: NextRequest) {
       }))
     ];
 
-    // Отправляем запрос к OpenAI
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: openaiMessages,
-      temperature: 0.7,
-      max_tokens: 1000,
-      stream: false, // Пока без стриминга, добавим позже
-    });
+    // Проверяем, нужен ли стриминг (из query параметров)
+    const url = new URL(request.url);
+    const useStreaming = url.searchParams.get('stream') === 'true';
 
-    const aiResponse = completion.choices[0]?.message?.content;
+    if (useStreaming) {
+      // Создаем стрим для OpenAI
+      const stream = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: openaiMessages,
+        temperature: 0.7,
+        max_tokens: 1000,
+        stream: true,
+      });
 
-    if (!aiResponse) {
-      return NextResponse.json({ error: 'No response from AI' }, { status: 500 });
-    }
+      // Создаем ReadableStream для передачи данных клиенту
+      const encoder = new TextEncoder();
+      const readableStream = new ReadableStream({
+        async start(controller) {
+          let fullContent = '';
 
-    // Подготавливаем ответ с метаданными
-    const response = {
-      role: 'assistant' as const,
-      content: aiResponse,
-      timestamp: new Date().toISOString(),
-      model: 'gpt-4o-mini',
-      assistantType,
-      metadata: {
-        userRole: effectiveUserRole,
-        knowledgeChunksUsed: contextResult.chunksUsed,
-        accessLevel: effectiveUserRole === 'Интересующийся' ? 'public' :
-                     effectiveUserRole === 'Пассажир' ? 'passenger' :
-                     effectiveUserRole === 'Матрос' ? 'sailor' : 'partner',
-        isGuest
+          try {
+            // Отправляем метаданные в начале стрима
+            const metadata = {
+              type: 'metadata',
+              assistantType,
+              userRole: effectiveUserRole,
+              knowledgeChunksUsed: contextResult.chunksUsed,
+              isGuest,
+              timestamp: new Date().toISOString()
+            };
+
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify(metadata)}\n\n`)
+            );
+
+            // Обрабатываем стрим от OpenAI
+            for await (const chunk of stream) {
+              const content = chunk.choices[0]?.delta?.content;
+              if (content) {
+                fullContent += content;
+
+                const streamData = {
+                  type: 'content',
+                  content: content,
+                  fullContent: fullContent
+                };
+
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify(streamData)}\n\n`)
+                );
+              }
+
+              // Проверяем завершение стрима
+              if (chunk.choices[0]?.finish_reason) {
+                const finishData = {
+                  type: 'finish',
+                  reason: chunk.choices[0].finish_reason,
+                  fullContent: fullContent,
+                  message: {
+                    role: 'assistant' as const,
+                    content: fullContent,
+                    timestamp: new Date().toISOString(),
+                    model: 'gpt-4o-mini',
+                    assistantType,
+                    metadata: {
+                      userRole: effectiveUserRole,
+                      knowledgeChunksUsed: contextResult.chunksUsed,
+                      accessLevel: effectiveUserRole === 'Интересующийся' ? 'public' :
+                                   effectiveUserRole === 'Пассажир' ? 'passenger' :
+                                   effectiveUserRole === 'Матрос' ? 'sailor' : 'partner',
+                      isGuest
+                    }
+                  }
+                };
+
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify(finishData)}\n\n`)
+                );
+                break;
+              }
+            }
+          } catch (error) {
+            const errorData = {
+              type: 'error',
+              error: error instanceof Error ? error.message : 'Unknown error'
+            };
+
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify(errorData)}\n\n`)
+            );
+          } finally {
+            controller.close();
+          }
+        }
+      });
+
+      return new Response(readableStream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+        },
+      });
+    } else {
+      // Обычный (не-стрим) ответ
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: openaiMessages,
+        temperature: 0.7,
+        max_tokens: 1000,
+        stream: false,
+      });
+
+      const aiResponse = completion.choices[0]?.message?.content;
+
+      if (!aiResponse) {
+        return NextResponse.json({ error: 'No response from AI' }, { status: 500 });
       }
-    };
 
-    // Возвращаем результат с дополнительной информацией
-    return NextResponse.json({
-      message: response,
-      usage: {
-        prompt_tokens: completion.usage?.prompt_tokens || 0,
-        completion_tokens: completion.usage?.completion_tokens || 0,
-        total_tokens: completion.usage?.total_tokens || 0
-      },
-      knowledgeChunksUsed: contextResult.chunksUsed,
-      userRole: effectiveUserRole,
-      isGuest
-    });
+      // Подготавливаем ответ с метаданными
+      const response = {
+        role: 'assistant' as const,
+        content: aiResponse,
+        timestamp: new Date().toISOString(),
+        model: 'gpt-4o-mini',
+        assistantType,
+        metadata: {
+          userRole: effectiveUserRole,
+          knowledgeChunksUsed: contextResult.chunksUsed,
+          accessLevel: effectiveUserRole === 'Интересующийся' ? 'public' :
+                       effectiveUserRole === 'Пассажир' ? 'passenger' :
+                       effectiveUserRole === 'Матрос' ? 'sailor' : 'partner',
+          isGuest
+        }
+      };
+
+      // Возвращаем результат с дополнительной информацией
+      return NextResponse.json({
+        message: response,
+        usage: {
+          prompt_tokens: completion.usage?.prompt_tokens || 0,
+          completion_tokens: completion.usage?.completion_tokens || 0,
+          total_tokens: completion.usage?.total_tokens || 0
+        },
+        knowledgeChunksUsed: contextResult.chunksUsed,
+        userRole: effectiveUserRole,
+        isGuest
+      });
+    }
 
   } catch (error) {
     console.error('Chat API Error:', error);

@@ -17,10 +17,20 @@ import {
   Navigation,
   ArrowLeft,
   Search,
-  X
+  X,
+  Paperclip,
+  Upload,
+  FileText,
+  Image,
+  Code,
+  FileSpreadsheet,
+  File,
+  Trash2
 } from 'lucide-react';
 import { useAppContext } from '@/lib/contexts/app-context';
 import { chatService, ChatMessage } from '@/lib/services/chat-service';
+import { persistentChatService, PersistentChatMessage } from '@/lib/services/persistent-chat-service';
+import { fileUploadService, ChatFile, FileUploadProgress } from '@/lib/services/file-upload-service';
 import { useRouter } from 'next/navigation';
 import { AssistantType, getAssistant } from '@/lib/types/assistants';
 
@@ -29,13 +39,15 @@ interface ChatBoxProps {
   onQuestionProcessed?: () => void;
   assistantType?: AssistantType;
   onChangeAssistant?: () => void;
+  existingSessionId?: string; // Для загрузки существующего чата
 }
 
 export function ChatBox({
   newQuestion,
   onQuestionProcessed,
   assistantType = 'navigator',
-  onChangeAssistant
+  onChangeAssistant,
+  existingSessionId
 }: ChatBoxProps) {
   const router = useRouter();
   const {
@@ -57,36 +69,150 @@ export function ChatBox({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingContent, setStreamingContent] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string>('');
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [uploadedFiles, setUploadedFiles] = useState<ChatFile[]>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<Record<string, FileUploadProgress>>({});
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Initialize session
+  // Initialize session and load history if needed
   useEffect(() => {
     const initSession = async () => {
       try {
-        const userRole = userProfile?.role || 'Интересующийся';
-        const id = await chatService.createChatSession(
-          language === 'ru' ? 'Новый чат' : 'New Chat',
-          assistantType,
-          userRole
-        );
-        setSessionId(id);
+        if (existingSessionId) {
+          // Загружаем существующий чат
+          setSessionId(existingSessionId);
+          const history = await persistentChatService.getChatHistory(existingSessionId);
+          setMessages(history.map(msg => ({
+            role: msg.role,
+            content: msg.content,
+            timestamp: msg.timestamp || new Date().toISOString(),
+            assistantType: msg.assistantType,
+            model: msg.model
+          })));
+
+          // Загружаем файлы для существующего чата
+          if (isAuthenticated) {
+            try {
+              const files = await fileUploadService.getChatFiles(existingSessionId);
+              setUploadedFiles(files);
+            } catch (error) {
+              console.error('Failed to load chat files:', error);
+            }
+          }
+        } else {
+          // Создаем новую сессию
+          const newSessionId = await persistentChatService.createChatSession(
+            language === 'ru' ? 'Новый чат' : 'New Chat',
+            assistantType
+          );
+          setSessionId(newSessionId);
+        }
       } catch (error) {
-        console.error('Failed to create chat session:', error);
+        console.error('Failed to initialize chat session:', error);
+        // Fallback to local session
+        setSessionId(`local-${Date.now()}`);
       }
     };
 
     if (isAuthenticated) {
       initSession();
+    } else {
+      // Для гостей используем локальную сессию
+      setSessionId(`guest-${Date.now()}`);
     }
-  }, [assistantType, isAuthenticated, language]);
+  }, [assistantType, isAuthenticated, language, existingSessionId]);
+
+  // Helper function for streaming response
+  const handleStreamingResponse = async (newMessages: ChatMessage[], userRole: string, userId?: string): Promise<ChatMessage | null> => {
+    try {
+      setIsStreaming(true);
+      setStreamingContent('');
+
+      // Prepare files context
+      const filesContext = fileUploadService.prepareFilesContext(uploadedFiles);
+
+      const response = await fetch('/api/chat?stream=true', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: newMessages,
+          assistantType,
+          userRole,
+          userId,
+          filesContext
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No reader available');
+      }
+
+      const decoder = new TextDecoder();
+      let fullContent = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+
+              if (data.type === 'content') {
+                fullContent += data.content;
+                setStreamingContent(fullContent);
+              } else if (data.type === 'finish') {
+                const aiMessage: ChatMessage = {
+                  role: 'assistant',
+                  content: data.fullContent,
+                  timestamp: data.message.timestamp,
+                  assistantType: data.message.assistantType,
+                  model: data.message.model
+                };
+
+                setMessages(prev => [...prev, aiMessage]);
+                setStreamingContent('');
+                setIsStreaming(false);
+                return aiMessage;
+              } else if (data.type === 'error') {
+                throw new Error(data.error);
+              }
+            } catch (parseError) {
+              // Ignore parsing errors for incomplete chunks
+            }
+          }
+        }
+      }
+    } catch (error) {
+      setIsStreaming(false);
+      setStreamingContent('');
+      throw error;
+    }
+
+    return null;
+  };
 
   const handleSend = useCallback(async (message?: string) => {
     const messageToSend = message || input.trim();
-    if (!messageToSend || isTyping) return;
+    if (!messageToSend || isTyping || isStreaming) return;
 
     // Validate message
     const validation = chatService.validateMessage(messageToSend);
@@ -117,29 +243,48 @@ export function ChatBox({
     setIsTyping(true);
 
     try {
-      // Send to OpenAI API with user role
       const userRole = userProfile?.role || 'Интересующийся';
       const userId = userProfile?.id;
-      const response = await chatService.sendMessage(newMessages, assistantType, userRole, userId);
 
-      const aiMessage: ChatMessage = {
-        role: 'assistant',
-        content: response.message.content,
-        timestamp: response.message.timestamp,
-        assistantType: response.message.assistantType,
-        model: response.message.model
-      };
+      // Save user message to persistent storage
+      if (isAuthenticated && sessionId && !sessionId.startsWith('local-') && !sessionId.startsWith('guest-')) {
+        try {
+          await persistentChatService.saveMessage(sessionId, userMessage, userId);
+        } catch (error) {
+          console.error('Failed to save user message:', error);
+        }
+      }
 
-      setMessages(prev => [...prev, aiMessage]);
+      // Use streaming for better UX
+      const aiResponse = await handleStreamingResponse(newMessages, userRole, userId);
+
+      // Save AI response to persistent storage
+      if (isAuthenticated && sessionId && !sessionId.startsWith('local-') && !sessionId.startsWith('guest-') && aiResponse) {
+        try {
+          await persistentChatService.saveMessage(sessionId, {
+            role: 'assistant',
+            content: aiResponse.content,
+            timestamp: aiResponse.timestamp,
+            assistantType: aiResponse.assistantType,
+            model: aiResponse.model
+          }, userId);
+        } catch (error) {
+          console.error('Failed to save AI message:', error);
+        }
+      }
 
       // Update user statistics if authenticated
       if (isAuthenticated) {
         await incrementStat('questionsAsked');
 
-        // Generate title for first message
-        if (newMessages.length === 1) {
-          const title = chatService.generateChatTitle(messageToSend, language);
-          // TODO: Update session title in Supabase
+        // Generate and update title for first message
+        if (newMessages.length === 1 && sessionId && !sessionId.startsWith('local-') && !sessionId.startsWith('guest-')) {
+          try {
+            const title = chatService.generateChatTitle(messageToSend, language);
+            await persistentChatService.updateChatTitle(sessionId, title, userId);
+          } catch (error) {
+            console.error('Failed to update chat title:', error);
+          }
         }
       } else {
         // Decrement responses for guests
@@ -161,13 +306,16 @@ export function ChatBox({
   }, [
     input,
     isTyping,
+    isStreaming,
     messages,
     assistantType,
     isAuthenticated,
     responsesLeft,
     language,
     decrementResponses,
-    incrementStat
+    incrementStat,
+    userProfile,
+    streamingContent
   ]);
 
   // Handle new question from quick questions
@@ -178,12 +326,12 @@ export function ChatBox({
     }
   }, [newQuestion, handleSend, onQuestionProcessed]);
 
-  // Auto-scroll to bottom when new messages are added
+  // Auto-scroll to bottom when new messages are added or streaming content changes
   useEffect(() => {
     if (scrollAreaRef.current) {
       scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, streamingContent]);
 
   const formatTime = (timestamp: string) => {
     const date = new Date(timestamp);
@@ -254,6 +402,132 @@ export function ChatBox({
     setShowSearch(false);
     clearChatSearch();
     setSearchQuery('');
+  };
+
+  // File upload handlers
+  const handleFileUpload = async (files: FileList) => {
+    if (!isAuthenticated || !sessionId || sessionId.startsWith('local-') || sessionId.startsWith('guest-')) {
+      setError(language === 'ru'
+        ? 'Загрузка файлов доступна только для зарегистрированных пользователей'
+        : 'File upload is only available for registered users'
+      );
+      return;
+    }
+
+    const fileArray = Array.from(files);
+
+    for (const file of fileArray) {
+      // Валидация файла
+      const validation = fileUploadService.validateFile(file);
+      if (!validation.isValid) {
+        setError(validation.error!);
+        continue;
+      }
+
+      try {
+        const uploadedFile = await fileUploadService.uploadFile(
+          file,
+          sessionId,
+          (progress) => {
+            setUploadProgress(prev => ({
+              ...prev,
+              [file.name]: progress
+            }));
+          }
+        );
+
+        setUploadedFiles(prev => [...prev, uploadedFile]);
+
+        // Очищаем прогресс после завершения
+        setUploadProgress(prev => {
+          const newProgress = { ...prev };
+          delete newProgress[file.name];
+          return newProgress;
+        });
+      } catch (error) {
+        console.error('File upload failed:', error);
+        setError(
+          error instanceof Error
+            ? error.message
+            : language === 'ru'
+              ? 'Ошибка загрузки файла'
+              : 'File upload error'
+        );
+
+        // Очищаем прогресс при ошибке
+        setUploadProgress(prev => {
+          const newProgress = { ...prev };
+          delete newProgress[file.name];
+          return newProgress;
+        });
+      }
+    }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      handleFileUpload(e.target.files);
+      // Сбрасываем input для возможности повторной загрузки того же файла
+      e.target.value = '';
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFileUpload(e.dataTransfer.files);
+    }
+  };
+
+  const handleFileDelete = async (fileId: string) => {
+    try {
+      await fileUploadService.deleteFile(fileId);
+      setUploadedFiles(prev => prev.filter(file => file.id !== fileId));
+    } catch (error) {
+      console.error('Failed to delete file:', error);
+      setError(
+        error instanceof Error
+          ? error.message
+          : language === 'ru'
+            ? 'Ошибка удаления файла'
+            : 'File deletion error'
+      );
+    }
+  };
+
+  const getFileIcon = (fileType: string) => {
+    switch (fileType) {
+      case 'image':
+        return <Image className="h-4 w-4" />;
+      case 'code':
+        return <Code className="h-4 w-4" />;
+      case 'spreadsheet':
+        return <FileSpreadsheet className="h-4 w-4" />;
+      case 'document':
+        return <FileText className="h-4 w-4" />;
+      default:
+        return <File className="h-4 w-4" />;
+    }
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   return (
@@ -432,8 +706,31 @@ export function ChatBox({
                 </div>
               ))
             )}
-            
-            {isTyping && (
+
+            {/* Streaming response */}
+            {isStreaming && streamingContent && (
+              <div className="flex gap-3 justify-start chat-message">
+                <Avatar className="h-8 w-8 mt-1">
+                  <AvatarFallback className={`${assistantInfo.bgColor} text-white`}>
+                    {assistantInfo.icon}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="max-w-[80%]">
+                  <div className="bg-muted p-3 rounded-lg">
+                    <p className="text-sm whitespace-pre-wrap leading-relaxed">
+                      {streamingContent}
+                      <span className="inline-block w-2 h-5 bg-primary ml-1 animate-pulse" />
+                    </p>
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1 text-left">
+                    {language === 'ru' ? 'Печатает...' : 'Typing...'}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Typing indicator for when AI is thinking */}
+            {isTyping && !isStreaming && (
               <div className="flex gap-3 justify-start chat-message">
                 <Avatar className="h-8 w-8 mt-1">
                   <AvatarFallback className={`${assistantInfo.bgColor} text-white`}>
@@ -496,8 +793,83 @@ export function ChatBox({
           </div>
         )}
 
+        {/* Uploaded files display */}
+        {uploadedFiles.length > 0 && (
+          <div className="px-4 py-2 border-t bg-muted/30">
+            <div className="text-xs font-medium text-muted-foreground mb-2">
+              {language === 'ru' ? 'Прикрепленные файлы:' : 'Attached files:'}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {uploadedFiles.map((file) => (
+                <div
+                  key={file.id}
+                  className="flex items-center gap-2 px-2 py-1 bg-background rounded border text-xs"
+                >
+                  {getFileIcon(file.fileType)}
+                  <span className="max-w-[100px] truncate">{file.originalFilename}</span>
+                  <span className="text-muted-foreground">({formatFileSize(file.fileSize)})</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-4 w-4 p-0 text-muted-foreground hover:text-destructive"
+                    onClick={() => handleFileDelete(file.id)}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Upload progress display */}
+        {Object.keys(uploadProgress).length > 0 && (
+          <div className="px-4 py-2 border-t bg-muted/30">
+            <div className="text-xs font-medium text-muted-foreground mb-2">
+              {language === 'ru' ? 'Загрузка файлов...' : 'Uploading files...'}
+            </div>
+            <div className="space-y-2">
+              {Object.entries(uploadProgress).map(([fileName, progress]) => (
+                <div key={fileName} className="text-xs">
+                  <div className="flex justify-between mb-1">
+                    <span className="truncate max-w-[150px]">{progress.fileName}</span>
+                    <span>{progress.progress}%</span>
+                  </div>
+                  <div className="w-full bg-muted rounded-full h-1">
+                    <div
+                      className="bg-primary h-1 rounded-full transition-all duration-300"
+                      style={{ width: `${progress.progress}%` }}
+                    />
+                  </div>
+                  {progress.status === 'error' && progress.error && (
+                    <div className="text-destructive mt-1">{progress.error}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Input area */}
-        <div className="p-4 border-t">
+        <div
+          className={`p-4 border-t transition-colors ${
+            isDragOver ? 'bg-primary/10 border-primary' : ''
+          }`}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {isDragOver && (
+            <div className="absolute inset-0 bg-primary/10 border-2 border-dashed border-primary rounded-lg flex items-center justify-center z-10">
+              <div className="text-center">
+                <Upload className="h-8 w-8 mx-auto mb-2 text-primary" />
+                <p className="text-primary font-medium">
+                  {language === 'ru' ? 'Отпустите для загрузки файлов' : 'Drop files to upload'}
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-2">
             <Input
               value={input}
@@ -511,6 +883,30 @@ export function ChatBox({
               disabled={isTyping || responsesLeft <= 0}
               className="flex-1"
             />
+
+            {/* File upload button */}
+            {isAuthenticated && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={handleFileInputChange}
+                  accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.json,.js,.py,.sql,.jpg,.jpeg,.png,.webp,.gif"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isTyping}
+                  title={language === 'ru' ? 'Прикрепить файл' : 'Attach file'}
+                >
+                  <Paperclip className="h-4 w-4" />
+                </Button>
+              </>
+            )}
+
             <Button
               onClick={() => handleSend()}
               disabled={!input.trim() || isTyping || responsesLeft <= 0}
@@ -524,13 +920,13 @@ export function ChatBox({
               )}
             </Button>
           </div>
-          
+
           {/* Hints */}
           <div className="mt-2 text-xs text-muted-foreground">
             {language === 'ru' ? (
-              <>Enter для отправки • Shift+Enter для новой строки</>
+              <>Enter для отправки • Shift+Enter для новой строки • Перетащите файлы для загрузки</>
             ) : (
-              <>Enter to send • Shift+Enter for new line</>
+              <>Enter to send • Shift+Enter for new line • Drag files to upload</>
             )}
           </div>
         </div>
