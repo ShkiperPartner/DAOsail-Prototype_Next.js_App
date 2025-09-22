@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -12,6 +12,34 @@ export function LeftSidebar() {
   const pathname = usePathname();
   const { language } = useAppContext();
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+
+  // Auto-expand items that have active children
+  useEffect(() => {
+    const shouldExpand = new Set<string>();
+
+    const checkForActiveChildren = (items: MenuItem[]): void => {
+      items.forEach(item => {
+        if (item.children && item.children.length > 0) {
+          const hasActiveChild = item.children.some(child =>
+            pathname === child.href || pathname.startsWith(child.href)
+          );
+
+          if (hasActiveChild) {
+            shouldExpand.add(item.id);
+          }
+
+          // Recursively check nested children
+          checkForActiveChildren(item.children);
+        }
+      });
+    };
+
+    checkForActiveChildren(menuItems);
+
+    if (shouldExpand.size > 0) {
+      setExpandedItems(prev => new Set([...prev, ...shouldExpand]));
+    }
+  }, [pathname]);
 
   const toggleExpanded = (itemId: string) => {
     const newExpanded = new Set(expandedItems);
@@ -34,13 +62,6 @@ export function LeftSidebar() {
     const hasActiveChild = hasChildren && item.children!.some(child =>
       pathname === child.href || pathname.startsWith(child.href)
     );
-
-    // Auto-expand if has active child
-    React.useEffect(() => {
-      if (hasActiveChild && !isExpanded) {
-        setExpandedItems(prev => new Set([...prev, item.id]));
-      }
-    }, [hasActiveChild, isExpanded, item.id]);
 
     return (
       <div key={item.id}>

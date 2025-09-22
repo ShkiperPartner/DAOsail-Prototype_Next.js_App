@@ -16,7 +16,11 @@ import {
   HelpCircle,
   Brain,
   Handshake,
-  UserCog
+  UserCog,
+  ExternalLink,
+  Info,
+  Lightbulb,
+  Presentation
 } from 'lucide-react';
 
 export interface MenuItem {
@@ -42,6 +46,22 @@ export const menuItems: MenuItem[] = [
     labelRu: 'Чат',
     href: '/chat',
     icon: MessageSquare,
+  },
+  {
+    id: 'about',
+    label: 'About Club',
+    labelRu: 'О клубе',
+    href: '/about',
+    icon: Info,
+    children: [
+      {
+        id: 'about-concepts',
+        label: 'Concepts & Presentations',
+        labelRu: 'Презентации и концепции',
+        href: '/about/concepts',
+        icon: Presentation,
+      },
+    ],
   },
   {
     id: 'sailing',
@@ -153,6 +173,15 @@ export const menuItems: MenuItem[] = [
     labelRu: 'Сообщество',
     href: '/community',
     icon: Users,
+    children: [
+      {
+        id: 'communities',
+        label: 'Our Communities',
+        labelRu: 'Наши сообщества',
+        href: '/communities',
+        icon: ExternalLink,
+      },
+    ],
   },
   {
     id: 'profile',
