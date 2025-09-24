@@ -1,5 +1,7 @@
 // User profile types for DAOsail application
 
+import { AssistantType } from './assistants';
+
 export type UserRole = 'Интересующийся' | 'Пассажир' | 'Матрос';
 
 export interface UserStats {
@@ -63,7 +65,7 @@ export interface ChatActivity {
   id: string;
   title: string;
   date: Date;
-  assistantType: 'Шкипер' | 'Навигатор' | 'Боцман';
+  assistantType: AssistantType;
   messagesCount: number;
   mainTopic: string;
 }

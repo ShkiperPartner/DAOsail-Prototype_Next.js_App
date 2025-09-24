@@ -46,7 +46,7 @@ export const mockRecentChats: ChatActivity[] = [
     id: '1',
     title: 'Основы навигации',
     date: new Date('2024-01-20T16:30:00'),
-    assistantType: 'Навигатор',
+    assistantType: 'navigator',
     messagesCount: 12,
     mainTopic: 'navigation'
   },
@@ -54,7 +54,7 @@ export const mockRecentChats: ChatActivity[] = [
     id: '2',
     title: 'Правила безопасности на воде',
     date: new Date('2024-01-19T11:15:00'),
-    assistantType: 'Шкипер',
+    assistantType: 'sailing_coach',
     messagesCount: 8,
     mainTopic: 'safety'
   },
@@ -62,7 +62,7 @@ export const mockRecentChats: ChatActivity[] = [
     id: '3',
     title: 'Подготовка к сезону',
     date: new Date('2024-01-17T14:45:00'),
-    assistantType: 'Боцман',
+    assistantType: 'steward',
     messagesCount: 15,
     mainTopic: 'preparation'
   }

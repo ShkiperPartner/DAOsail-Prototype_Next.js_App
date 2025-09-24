@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { createClient } from '@/lib/supabase/server';
+import { validateOpenAI } from '@/lib/utils/env-validation';
+import { createStreamResponse, createApiResponse } from '@/lib/utils/cors';
 
-// Инициализируем OpenAI
+// Инициализируем OpenAI с валидацией
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: validateOpenAI(),
 });
 
 // Функция для поиска релевантного контекста с учетом роли пользователя
@@ -281,16 +283,7 @@ export async function POST(request: NextRequest) {
         }
       });
 
-      return new Response(readableStream, {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type',
-        },
-      });
+      return createStreamResponse(readableStream, request.headers.get('origin'));
     } else {
       // Обычный (не-стрим) ответ
       const completion = await openai.chat.completions.create({

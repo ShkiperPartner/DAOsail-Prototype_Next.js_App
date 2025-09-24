@@ -92,7 +92,7 @@ export default function CommunitiesPage() {
               title={community.title}
               description={community.description}
               link={community.link}
-              color={community.color}
+              color={community.color as any}
             />
           ))}
         </div>

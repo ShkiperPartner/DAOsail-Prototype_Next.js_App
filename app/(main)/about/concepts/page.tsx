@@ -114,7 +114,7 @@ export default function ConceptsPage() {
               title={concept.title}
               description={concept.description}
               link={concept.link}
-              color={concept.color}
+              color={concept.color as any}
             />
           ))}
         </div>

@@ -64,7 +64,6 @@ export function AvatarUpload({
 
       if (uploadedUrl) {
         onAvatarChange?.(uploadedUrl);
-        console.log('Avatar uploaded successfully:', uploadedUrl);
       } else {
         alert(language === 'ru' ? 'Ошибка при загрузке изображения' : 'Error uploading image');
         setPreviewUrl(null);
