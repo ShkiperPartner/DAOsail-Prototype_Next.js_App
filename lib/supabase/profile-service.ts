@@ -72,7 +72,7 @@ export class ProfileService {
 
     return {
       id: profile.id,
-      email: '', // Email берется из auth.users, здесь не храним
+      email: profile.email || '', // ✅ Теперь берем email из таблицы profiles
       fullName: profile.full_name,
       nickname: profile.nickname || undefined,
       avatarUrl: profile.avatar_url || undefined,

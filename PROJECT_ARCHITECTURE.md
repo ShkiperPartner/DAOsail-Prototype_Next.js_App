@@ -1,9 +1,9 @@
 # Project Architecture Overview
 
 **Проект:** DAOsail Prototype - Next.js App
-**Версия:** 0.7.0
-**Дата обновления:** 2025-01-24
-**Статус:** Активная разработка - Phase 7.2 завершена (Architecture Analysis & Code Quality)
+**Версия:** 0.8.0
+**Дата обновления:** 2025-01-25
+**Статус:** Активная разработка - Phase 8.0 начата (Database Fixes & Email Integration)
 
 ---
 
@@ -494,7 +494,15 @@ User Click → Next.js Link →
 - [x] **Dependency updates** - Security audit (0 vulnerabilities), caniuse-lite update
 - [x] **Development infrastructure** - Analysis tools (depcheck, ts-prune)
 
-### 📋 Планируется (Phase 8.0: RAG & Knowledge System)
+**Phase 8.0: Database Fixes & Email Integration (В процессе)**
+- [x] **Email leads table** - Создана таблица для сохранения email гостей (migration 008)
+- [x] **Profile email integration** - Email теперь сохраняется и отображается в профилях (migration 009)
+- [x] **Profile editing fix** - Исправлено редактирование никнейма, города, описания
+- [x] **TypeScript types update** - Обновлены типы для поддержки email в profiles
+- [ ] **Email leads API** - REST endpoint для сохранения email из формы email-capture
+- [ ] **Guest chat tracking** - Связывание гостевых чатов с email лидами
+
+### 📋 Планируется (Phase 8.1: RAG & Knowledge System)
 - [ ] **pgvector integration** - Полноценная RAG система с векторным поиском
 - [ ] **Knowledge base expansion** - Структурированная база знаний по парусному спорту
 - [ ] **Advanced search** - Семантический поиск с фильтрами по ролям и категориям

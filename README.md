@@ -1,7 +1,7 @@
 # DAOsail Prototype
 
-**Version:** 0.7.0
-**Status:** Active Development - Phase 7.1 completed (File Upload System)
+**Version:** 0.8.0
+**Status:** Active Development - Phase 8.0 started (Database Fixes & Email Integration)
 
 A Next.js-based prototype for DAOsail - an educational platform combining sailing knowledge with DAO governance and AI assistance.
 

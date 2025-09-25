@@ -10,6 +10,7 @@ export interface Database {
           avatar_url: string | null;
           city: string | null;
           bio: string | null;
+          email: string | null;
           role: 'Интересующийся' | 'Пассажир' | 'Матрос';
           join_date: string;
           created_at: string;
@@ -22,6 +23,7 @@ export interface Database {
           avatar_url?: string | null;
           city?: string | null;
           bio?: string | null;
+          email?: string | null;
           role?: 'Интересующийся' | 'Пассажир' | 'Матрос';
           join_date?: string;
         };
@@ -31,6 +33,7 @@ export interface Database {
           avatar_url?: string | null;
           city?: string | null;
           bio?: string | null;
+          email?: string | null;
           role?: 'Интересующийся' | 'Пассажир' | 'Матрос';
         };
       };
