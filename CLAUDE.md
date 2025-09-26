@@ -3,6 +3,7 @@
 **Проект:** DAOsail Prototype - Next.js App  
 **Цель:** Мета-инструкции для эффективной работы с DAOsail проектом  
 **Дата создания:** 2025-01-14
+**Последнее обновление:** 2025-09-26 (v0.8.1 - FAQ Agent MVP)
 
 ---
 
@@ -27,6 +28,7 @@ components/                   # React компоненты
 ├── layout/                   # Layout компоненты
 ├── ui/                       # Переиспользуемые UI компоненты
 │   ├── chat-box.tsx          # Основной чат с ИИ ассистентами
+│   ├── citations-display.tsx # Показ источников FAQ (NEW v0.8.1)
 │   ├── email-capture.tsx     # Форма захвата email для гостей (NEW v0.5.0)
 │   └── ...                   # Другие UI компоненты
 lib/                          # Утилиты и контексты
@@ -531,6 +533,123 @@ export function getCorsHeaders(origin?: string | null): Record<string, string> {
 
 ---
 
+## 🆕 Обновления версии 0.8.1 (2025-09-26)
+
+### FAQ Agent MVP - Паттерны реализации:
+
+#### **RAG Architecture Pattern:**
+```typescript
+// Структура FAQ агента с векторным поиском
+1. User Query → Embedding (OpenAI)
+2. Vector Search → match_docs(embedding, roles[], similarity)
+3. Context Formation → релевантные чанки + источники
+4. LLM Generation → строгий промпт без галлюцинаций
+5. Response + Citations → показ источников пользователю
+```
+
+#### **Database Schema Pattern:**
+```sql
+-- Векторная база знаний
+knowledge_chunks: {
+  id, doc_id, chunk_idx, text,
+  embedding vector(1536),
+  accessible_roles text[], -- role-based доступ
+  tags text[], url
+}
+
+-- Чат логи с метаданными
+chat_messages: {
+  id, session_id, role, content, agent,
+  meta jsonb -- citations, trace info
+}
+```
+
+#### **Edge Function Pattern:**
+```typescript
+// Supabase Edge Function для FAQ
+supabase/functions/handle-faq/index.ts
+├── Environment validation
+├── Embedding generation (OpenAI)
+├── Vector search (match_docs RPC)
+├── Context preparation
+├── LLM response (strict prompt)
+└── Response with citations
+```
+
+#### **Frontend Integration Pattern:**
+```typescript
+// ChatBox с поддержкой FAQ режима
+if (assistantType === 'faq') {
+  const response = await fetch('/api/faq', {
+    body: JSON.stringify({
+      session_id, user_message,
+      user_role, prefs: { lang }
+    })
+  });
+  // Получаем ответ с citations
+  const { final_text, citations, trace } = await response.json();
+}
+
+// CitationsDisplay компонент
+<CitationsDisplay
+  citations={message.citations}
+  traceInfo={message.trace}
+/>
+```
+
+#### **Prompt Engineering Pattern:**
+```typescript
+const systemPrompt = `Ты FAQ ассистент DAOsail — строгий и точный помощник.
+
+🎯 ГЛАВНОЕ ПРАВИЛО: Отвечаешь ТОЛЬКО по контексту. Никаких выдумок!
+
+📋 ИНСТРУКЦИИ:
+• Если есть информация → отвечай четко и кратко
+• Если информации НЕТ → "В базе знаний нет информации"
+• Ссылайся на источники [1], [2]
+• Тон: деловой, дружелюбный
+• Длина: максимум 150 слов`;
+```
+
+### Частые проблемы и решения v0.8.1:
+
+**Vector extension missing:**
+**Проблема:** `function public.match_docs() does not exist`
+**Решение:** Применить `FIX_MIGRATION.sql` в Supabase SQL Editor с `create extension if not exists vector;`
+
+**Policy syntax error:**
+**Проблема:** `create policy if not exists` не поддерживается в PostgreSQL
+**Решение:** Использовать `drop policy if exists` + `create policy`
+
+**Empty array type error:**
+**Проблема:** `cannot determine type of empty array`
+**Решение:** Явно указать тип: `array[]::text[]` вместо `array[]`
+
+**Citations не отображаются:**
+**Проблема:** Citations компонент не показывает источники
+**Решение:** Проверить `message.citations` в ChatMessage interface и импорт CitationsDisplay
+
+### Embeddings Pipeline Pattern:
+```typescript
+// scripts/embeddings/upload-faq.ts
+1. Читаем .md файлы
+2. Чанкуем текст (600 tokens, overlap 100)
+3. Получаем embeddings (OpenAI ada-002)
+4. Upsert в knowledge_chunks с ролями доступа
+5. Batch операции для производительности
+```
+
+### Testing Pattern:
+```javascript
+// scripts/test-faq.js - автономное тестирование
+1. Mock контекст из базы знаний
+2. Тестовые вопросы (в теме + вне темы)
+3. Проверка: галлюцинации vs корректные отказы
+4. Валидация использования источников [1], [2]
+```
+
+---
+
 *Этот файл должен обновляться при каждом завершении спринта*
 *Цель: циклическая разработка с обязательным обновлением документации*
-*Последнее обновление: 2025-01-24 (v0.7.2 Architecture Analysis & Code Quality)*
+*Последнее обновление: 2025-09-26 (v0.8.1 FAQ Agent MVP Complete)*

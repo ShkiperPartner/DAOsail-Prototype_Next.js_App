@@ -1,9 +1,9 @@
 # Project Architecture Overview
 
 **Проект:** DAOsail Prototype - Next.js App
-**Версия:** 0.8.0
-**Дата обновления:** 2025-01-25
-**Статус:** Активная разработка - Phase 8.0 начата (Database Fixes & Email Integration)
+**Версия:** 0.8.1
+**Дата обновления:** 2025-09-26
+**Статус:** Активная разработка - Phase 8.1 FAQ Agent MVP реализован
 
 ---
 
@@ -74,6 +74,7 @@ app/
 │   └── tutorial/         # Страница обучения
 ├── api/                  # API Routes
 │   ├── chat/             # OpenAI чат интеграция
+│   ├── faq/              # FAQ агент с RAG поиском (NEW!)
 │   └── search-knowledge/ # Поиск в базе знаний
 ├── layout.tsx            # Root layout
 └── globals.css           # Глобальные стили
@@ -92,7 +93,8 @@ components/
 │   └── achievements-tab.tsx   # Вкладка достижений
 └── ui/                   # Переиспользуемые UI компоненты
     ├── hero-card.tsx     # Главная карточка
-    ├── chat-box.tsx      # Интерфейс чата
+    ├── chat-box.tsx      # Интерфейс чата (обновлен для FAQ)
+    ├── citations-display.tsx # Показ источников FAQ (NEW!)
     ├── quick-questions.tsx # Быстрые вопросы
     ├── avatar-upload.tsx # Компонент загрузки аватаров
     ├── community-card.tsx # Карточки внешних сообществ
@@ -112,7 +114,8 @@ lib/
 │   ├── chat-service.ts   # Сервис для работы с OpenAI API
 │   └── embedding-service.ts # Работа с vector embeddings
 ├── types/
-│   └── profile.ts        # Типы для профилей пользователей
+│   ├── profile.ts        # Типы для профилей пользователей
+│   └── assistants.ts     # Типы ассистентов + FAQ messages (NEW!)
 ├── config/
 │   └── roles.ts          # Конфигурация ролей и прогресса
 └── utils.ts              # Общие утилиты
@@ -124,9 +127,19 @@ data/
 supabase/                 # Supabase CLI конфигурация
 ├── migrations/           # Миграции базы данных
 │   ├── 001_create_profiles_schema.sql
-│   └── 002_setup_vector_embeddings.sql
+│   ├── 002_setup_vector_embeddings.sql
+│   └── 20250926000001_create_faq_tables.sql (NEW!)
+├── functions/            # Edge Functions
+│   └── handle-faq/       # FAQ агент с RAG (NEW!)
 ├── config.toml          # Конфигурация Supabase CLI
 └── seed.sql             # Начальные данные + база знаний
+
+scripts/                  # Утилиты и скрипты
+├── embeddings/           # Работа с векторной БД (NEW!)
+│   ├── upload-faq.ts     # Загрузка FAQ документов
+│   └── package.json      # Зависимости для embeddings
+├── test-faq.js          # Тестирование FAQ агента (NEW!)
+└── simple-faq-data.md   # Тестовые данные FAQ (NEW!)
 ```
 
 ---
@@ -494,7 +507,7 @@ User Click → Next.js Link →
 - [x] **Dependency updates** - Security audit (0 vulnerabilities), caniuse-lite update
 - [x] **Development infrastructure** - Analysis tools (depcheck, ts-prune)
 
-**Phase 8.0: Database Fixes & Email Integration (В процессе)**
+**Phase 8.0: Database Fixes & Email Integration (Завершена)**
 - [x] **Email leads table** - Создана таблица для сохранения email гостей (migration 008)
 - [x] **Profile email integration** - Email теперь сохраняется и отображается в профилях (migration 009)
 - [x] **Profile editing fix** - Исправлено редактирование никнейма, города, описания
@@ -502,12 +515,24 @@ User Click → Next.js Link →
 - [ ] **Email leads API** - REST endpoint для сохранения email из формы email-capture
 - [ ] **Guest chat tracking** - Связывание гостевых чатов с email лидами
 
-### 📋 Планируется (Phase 8.1: RAG & Knowledge System)
-- [ ] **pgvector integration** - Полноценная RAG система с векторным поиском
-- [ ] **Knowledge base expansion** - Структурированная база знаний по парусному спорту
-- [ ] **Advanced search** - Семантический поиск с фильтрами по ролям и категориям
-- [ ] **Context optimization** - Умное управление контекстом для ответов ИИ
-- [ ] **Performance optimization** - Sub-second response times для поиска
+**Phase 8.1: FAQ Agent MVP (Завершена v0.8.1) 🎉**
+- [x] **FAQ Agent Architecture** - Полноценный RAG-агент с векторным поиском
+- [x] **Database Schema** - Таблицы chat_messages, knowledge_chunks + match_docs RPC function
+- [x] **Edge Function** - handle-faq с OpenAI API интеграцией и поиском по БЗ
+- [x] **API Integration** - /api/faq route для фронтенд интеграции
+- [x] **Chat UI Updates** - Поддержка FAQ режима в ChatBox с citations display
+- [x] **Citations Component** - Красивый показ источников с релевантностью
+- [x] **Embeddings Pipeline** - Скрипты загрузки документов в векторную БД
+- [x] **Testing Infrastructure** - Локальное тестирование агента с моковыми данными
+- [x] **Prompt Engineering** - Строгий промпт без галлюцинаций, только по базе знаний
+- [x] **TypeScript Integration** - Расширенные типы для FAQ messages с citations
+
+### 📋 Планируется (Phase 9: Advanced RAG Features)
+- [ ] **Multi-agent Orchestration** - Мета-агент с под-агентами (Тренер, DAO, FAQ)
+- [ ] **Knowledge Base Expansion** - Загрузка полной базы знаний DAOsail
+- [ ] **Advanced Search** - Семантический поиск с фильтрами по ролям и категориям
+- [ ] **Context Optimization** - Умное управление контекстом для ответов ИИ
+- [ ] **Performance Optimization** - Sub-second response times для поиска
 
 ### 📋 Планируется (Phase 8: Social & Advanced Features)
 - [ ] Система лидербордов и рейтингов
@@ -573,17 +598,23 @@ chat_search_index (
   search_vector tsvector, timestamps
 )
 
--- База знаний с vector embeddings
-knowledge_documents (
-  id, title, content, source_type, source_url, file_path,
-  language, category, embedding vector(1536), timestamps
+-- База знаний с vector embeddings (NEW v0.8.1!)
+knowledge_chunks (
+  id, doc_id, chunk_idx, text, embedding vector(1536),
+  accessible_roles text[], tags text[], url, updated_at
+)
+
+-- Сообщения FAQ агента (NEW v0.8.1!)
+chat_messages (
+  id, session_id, role, content, agent, created_at, meta jsonb
 )
 ```
 
 ### Vector Search & RAG System
 - **pgvector extension** включен для семантического поиска
 - **Embeddings model** OpenAI text-embedding-ada-002 (1536 dimensions)
-- **Search function** search_knowledge_documents() с настраиваемым порогом similarity
+- **Search function** match_docs(query_embedding, match_count, roles[], min_similarity) с role-based доступом
+- **FAQ Agent** - Полноценный RAG-агент с citations и строгими guardrails против галлюцинаций
 - **Categories** sailing_basics, navigation, safety, weather, equipment, racing, etc.
 - **Languages** поддержка ru/en контента
 

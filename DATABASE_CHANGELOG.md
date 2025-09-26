@@ -71,12 +71,66 @@ CREATE TABLE email_leads (
 - [ ] Интеграция с существующим `chat-box` для трекинга гостевых сессий
 - [ ] Dashboard для просмотра лидов (админ панель)
 
-### **Phase 8.2: RAG System Database**
-- [ ] pgvector extension activation
-- [ ] Embeddings storage для knowledge base
-- [ ] Vector search functions
+### **Migration 010** - FAQ Agent RAG System (2025-09-26) ✅
+**Файл:** `supabase/migrations/20250926000001_create_faq_tables.sql`
+
+**Добавлено:**
+- ✅ **Vector extension** - включен pgvector для семантического поиска
+- ✅ **Таблица `chat_messages`** - логирование сообщений FAQ агента
+- ✅ **Таблица `knowledge_chunks`** - векторная база знаний с эмбеддингами
+- ✅ **RPC функция `match_docs`** - семантический поиск с role-based доступом
+- ✅ **RLS политики** - безопасный доступ к knowledge base
+- ✅ **Permissions** - права для anon/authenticated пользователей
+
+**Структура таблиц:**
+```sql
+-- FAQ агент чат-логи
+CREATE TABLE chat_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id TEXT NOT NULL,
+  role TEXT CHECK (role IN ('user','assistant','system','tool')),
+  content TEXT NOT NULL,
+  agent TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  meta JSONB DEFAULT '{}'
+);
+
+-- Векторная база знаний
+CREATE TABLE knowledge_chunks (
+  id BIGSERIAL PRIMARY KEY,
+  doc_id TEXT NOT NULL,
+  chunk_idx INT NOT NULL,
+  text TEXT NOT NULL,
+  embedding VECTOR(1536),
+  accessible_roles TEXT[] DEFAULT ARRAY['public'],
+  tags TEXT[] DEFAULT ARRAY[]::TEXT[],
+  url TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- RPC: Семантический поиск с role filtering
+CREATE FUNCTION match_docs(
+  query_embedding VECTOR(1536),
+  match_count INT DEFAULT 8,
+  roles TEXT[] DEFAULT ARRAY['public'],
+  min_similarity FLOAT DEFAULT 0.75
+) RETURNS TABLE (id BIGINT, doc_id TEXT, chunk_idx INT, text TEXT, url TEXT, similarity FLOAT);
+```
+
+**Индексы:**
+- ✅ **ivfflat index** на embedding колонку для быстрого vector поиска
+- ✅ **GIN index** на accessible_roles для эффективной фильтрации ролей
+- ✅ **B-tree indexes** на session_id, agent, doc_id для быстрых запросов
 
 ---
 
-*Последнее обновление: 2025-01-25*
-*Версия проекта: 0.8.0 (Database Fixes & Email Integration)*
+### **Phase 9: Advanced RAG Features**
+- [ ] Multi-document knowledge base expansion
+- [ ] Conversation memory для FAQ агента
+- [ ] Advanced chunking strategies
+- [ ] Performance optimization (sub-second responses)
+
+---
+
+*Последнее обновление: 2025-09-26*
+*Версия проекта: 0.8.1 (FAQ Agent MVP Complete)*

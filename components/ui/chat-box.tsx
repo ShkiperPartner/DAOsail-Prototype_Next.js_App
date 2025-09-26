@@ -28,7 +28,9 @@ import {
   Trash2
 } from 'lucide-react';
 import { useAppContext } from '@/lib/contexts/app-context';
-import { chatService, ChatMessage } from '@/lib/services/chat-service';
+import { chatService } from '@/lib/services/chat-service';
+import { ChatMessage } from '@/lib/types/assistants';
+import { CitationsDisplay } from '@/components/ui/citations-display';
 import { persistentChatService, PersistentChatMessage } from '@/lib/services/persistent-chat-service';
 import { fileUploadService, ChatFile, FileUploadProgress } from '@/lib/services/file-upload-service';
 import { useRouter } from 'next/navigation';
@@ -129,7 +131,47 @@ export function ChatBox({
     }
   }, [assistantType, isAuthenticated, language, existingSessionId]);
 
-  // Helper function for streaming response
+  // Helper function for FAQ response
+  const handleFAQResponse = async (userMessage: string, userRole: string): Promise<ChatMessage | null> => {
+    try {
+      const response = await fetch('/api/faq', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+          user_message: userMessage,
+          user_role: userRole.toLowerCase(),
+          prefs: { lang: language }
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.details || errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      const aiMessage: ChatMessage = {
+        role: 'assistant',
+        content: data.final_text,
+        timestamp: new Date().toISOString(),
+        assistantType: 'faq' as AssistantType,
+        citations: data.citations,
+        trace: data.trace
+      };
+
+      setMessages(prev => [...prev, aiMessage]);
+      return aiMessage;
+    } catch (error) {
+      console.error('FAQ API error:', error);
+      throw error;
+    }
+  };
+
+  // Helper function for streaming response (fallback)
   const handleStreamingResponse = async (newMessages: ChatMessage[], userRole: string, userId?: string): Promise<ChatMessage | null> => {
     try {
       setIsStreaming(true);
@@ -255,8 +297,15 @@ export function ChatBox({
         }
       }
 
-      // Use streaming for better UX
-      const aiResponse = await handleStreamingResponse(newMessages, userRole, userId);
+      // Use FAQ agent if assistant type is 'faq'
+      let aiResponse: ChatMessage | null = null;
+
+      if (assistantType === 'faq') {
+        aiResponse = await handleFAQResponse(messageToSend, userRole);
+      } else {
+        // Use streaming for other assistants
+        aiResponse = await handleStreamingResponse(newMessages, userRole, userId);
+      }
 
       // Save AI response to persistent storage
       if (isAuthenticated && sessionId && !sessionId.startsWith('local-') && !sessionId.startsWith('guest-') && aiResponse) {
@@ -689,6 +738,17 @@ export function ChatBox({
                         </div>
                       )}
                     </div>
+
+                    {/* Show citations for FAQ messages */}
+                    {message.role === 'assistant' && message.citations && message.citations.length > 0 && (
+                      <div className="mt-2">
+                        <CitationsDisplay
+                          citations={message.citations}
+                          traceInfo={message.trace}
+                        />
+                      </div>
+                    )}
+
                     <div className={`text-xs text-muted-foreground mt-1 ${
                       message.role === 'user' ? 'text-right' : 'text-left'
                     }`}>

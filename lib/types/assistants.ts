@@ -4,7 +4,8 @@ import {
   Coins,
   Bot,
   User,
-  Settings
+  Settings,
+  HelpCircle
 } from 'lucide-react';
 
 export type AssistantType =
@@ -13,7 +14,8 @@ export type AssistantType =
   | 'dao_advisor'    // Шкипер ДАО - советник по DAO
   | 'ai_guide'       // Шкипер Партнер (главный) - гид по ИИ
   | 'personal'       // Шкипер Компаньон - личный ассистент
-  | 'steward';       // Стюард - сервисные функции
+  | 'steward'        // Стюард - сервисные функции
+  | 'faq';           // FAQ ассистент - отвечает только по базе знаний
 
 export interface Assistant {
   id: AssistantType;
@@ -30,6 +32,26 @@ export interface Assistant {
   available: boolean;
   requiresAuth?: boolean;
   requiresRole?: string[];
+}
+
+// Extended interface for chat messages to include FAQ specific data
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: string;
+  assistantType?: AssistantType;
+  model?: string;
+  citations?: Array<{
+    doc_id: string;
+    url: string | null;
+    chunk_idx: number;
+    similarity: number;
+  }>;
+  trace?: {
+    intent: string;
+    tools: string[];
+    latency_ms: number;
+  };
 }
 
 export const assistants: Assistant[] = [
@@ -118,6 +140,20 @@ export const assistants: Assistant[] = [
     color: 'from-gray-500 to-slate-500',
     specialization: 'Administrative support and services',
     specializationRu: 'Административная поддержка и услуги',
+    available: true,
+  },
+  {
+    id: 'faq',
+    title: 'FAQ Assistant',
+    titleRu: 'FAQ Ассистент',
+    description: 'Answers questions based only on knowledge base content',
+    descriptionRu: 'Отвечает на вопросы только на основе базы знаний',
+    role: 'FAQ Bot',
+    roleRu: 'FAQ Бот',
+    icon: HelpCircle,
+    color: 'from-green-500 to-emerald-500',
+    specialization: 'Knowledge base search and answers',
+    specializationRu: 'Поиск по базе знаний и ответы',
     available: true,
   },
 ];
