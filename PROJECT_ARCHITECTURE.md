@@ -757,5 +757,463 @@ chat_messages (
 
 ---
 
+## 🚀 Claude 4.5 Architecture Recommendations
+
+### 1. Next.js App Router Optimization
+
+**Текущая оценка:**
+- ✅ Хорошо: App Router структура с route groups
+- ✅ Хорошо: Server/Client Components разделение
+- ⚠️ Улучшить: Некоторые компоненты могут быть Server Components
+- ⚠️ Улучшить: Code splitting для route groups
+
+**Рекомендации:**
+```typescript
+// Анализ текущих компонентов:
+
+// ✅ Правильно Client Components:
+// - components/ui/chat-box.tsx (useState, useEffect)
+// - components/ui/email-capture.tsx (forms, state)
+// - components/layout/mobile-drawer.tsx (interactions)
+
+// ⚠️ Могут быть Server Components:
+// - components/ui/hero-card.tsx (статичный контент)
+// - components/ui/community-card.tsx (если нет onClick)
+// - components/profile/achievements-tab.tsx (если данные из props)
+
+// 🎯 Code Splitting Pattern:
+// app/(main)/chat/page.tsx
+export default async function ChatPage() {
+  // Server Component для начальной загрузки
+  return (
+    <Suspense fallback={<ChatSkeleton />}>
+      <ChatBoxClient /> {/* Dynamic import */}
+    </Suspense>
+  );
+}
+```
+
+### 2. React Context Performance
+
+**Текущая проблема:**
+- AppContext содержит все состояния (theme, language, auth, guest flow)
+- Любое изменение вызывает re-render всех подписчиков
+
+**Рекомендации:**
+```typescript
+// Разделить на специализированные контексты:
+
+// 1. ThemeContext (редкие изменения)
+interface ThemeContextType {
+  theme: 'light' | 'dark';
+  toggleTheme: () => void;
+}
+
+// 2. LocaleContext (редкие изменения)
+interface LocaleContextType {
+  language: 'en' | 'ru';
+  toggleLanguage: () => void;
+}
+
+// 3. AuthContext (средние изменения)
+interface AuthContextType {
+  user: User | null;
+  isAuthenticated: boolean;
+  login: (credentials) => Promise<void>;
+  logout: () => Promise<void>;
+}
+
+// 4. GuestFlowContext (частые изменения)
+interface GuestFlowContextType {
+  responsesLeft: number;
+  guestStage: number;
+  emailCaptured: string | null;
+  totalQuestionsAsked: number;
+  decrementResponses: () => void;
+  captureEmail: (email: string) => Promise<void>;
+}
+
+// Преимущества:
+// - Компоненты подписываются только на нужные данные
+// - Меньше re-renders
+// - Лучшая производительность
+```
+
+### 3. Component Memoization Strategy
+
+**Анализ компонентов:**
+```typescript
+// 🎯 Высокий приоритет для memo:
+
+// ChatBox - много state, частые updates
+export const ChatBox = React.memo(({
+  assistantType,
+  onBack
+}: ChatBoxProps) => {
+  // Использовать useCallback для функций
+  const handleSend = useCallback((message: string) => {
+    // logic
+  }, [assistantType]);
+
+  // Использовать useMemo для вычислений
+  const filteredMessages = useMemo(
+    () => messages.filter(m => m.agent === assistantType),
+    [messages, assistantType]
+  );
+
+  return <div>...</div>;
+});
+
+// AssistantDock - scroll events
+export const AssistantDock = React.memo(() => {
+  const handleScroll = useMemo(
+    () => debounce(() => {
+      // scroll logic
+    }, 100),
+    []
+  );
+
+  return <div>...</div>;
+});
+
+// ProfileInfoTab - real-time updates
+export const ProfileInfoTab = React.memo(({ profile }: Props) => {
+  // Selective context subscription
+  const updateProfile = useAppContext(ctx => ctx.updateProfile);
+
+  return <div>...</div>;
+});
+```
+
+### 4. Database Query Optimization
+
+**Текущие запросы:**
+```typescript
+// ⚠️ Можно оптимизировать:
+const { data } = await supabase
+  .from('profiles')
+  .select('*'); // выбираем всё
+
+// ✅ Лучше (только нужные поля):
+const { data } = await supabase
+  .from('profiles')
+  .select(`
+    id,
+    full_name,
+    nickname,
+    avatar_url,
+    role,
+    user_stats(questions_asked, lessons_completed)
+  `)
+  .eq('id', userId)
+  .single();
+```
+
+**Рекомендации для FAQ Agent:**
+```typescript
+// Оптимизация match_docs:
+create or replace function match_docs(
+  query_embedding vector(1536),
+  match_count int default 5,
+  user_roles text[] default array['гость']::text[],
+  min_similarity float default 0.7 -- добавить threshold
+) returns table (
+  id uuid,
+  text text,
+  similarity float,
+  url text
+)
+language sql stable
+as $$
+  select
+    id,
+    text,
+    1 - (embedding <=> query_embedding) as similarity,
+    url
+  from knowledge_chunks
+  where
+    accessible_roles && user_roles
+    and 1 - (embedding <=> query_embedding) > min_similarity -- фильтр до sort
+  order by embedding <=> query_embedding
+  limit match_count;
+$$;
+
+// Добавить индекс для ролей:
+create index if not exists idx_knowledge_chunks_roles
+on knowledge_chunks using gin(accessible_roles);
+```
+
+### 5. RAG System Enhancements
+
+**Текущая реализация (v0.8.1):**
+- ✅ Vector search работает
+- ✅ Citations отображаются
+- ⚠️ Нет кэширования embeddings
+- ⚠️ Нет reranking результатов
+
+**Рекомендации:**
+```typescript
+// 1. Кэширование embeddings для часто задаваемых вопросов:
+interface EmbeddingsCache {
+  [questionHash: string]: {
+    embedding: number[];
+    timestamp: number;
+    hits: number;
+  };
+}
+
+// 2. Reranking для улучшения релевантности:
+async function rerankResults(
+  results: SearchResult[],
+  userQuery: string
+): Promise<SearchResult[]> {
+  // Использовать cross-encoder модель для reranking
+  // Или простой BM25 scoring по ключевым словам
+  return results.sort((a, b) => {
+    const scoreA = calculateRelevance(a.text, userQuery);
+    const scoreB = calculateRelevance(b.text, userQuery);
+    return scoreB - scoreA;
+  });
+}
+
+// 3. Adaptive threshold по ролям:
+const similarityThresholds = {
+  'гость': 0.75,      // строже для гостей
+  'пассажир': 0.70,   // средне
+  'матрос': 0.65,     // более свободно
+};
+```
+
+### 6. OpenAI API Optimizations
+
+**Текущая реализация:**
+- ✅ Хорошо: GPT-4o-mini для экономии
+- ⚠️ Улучшить: нет streaming
+- ⚠️ Улучшить: нет error retry logic
+
+**Рекомендации:**
+```typescript
+// 1. Streaming для лучшего UX:
+export async function streamChatResponse(
+  messages: ChatMessage[],
+  onChunk: (text: string) => void
+) {
+  const stream = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages,
+    stream: true,
+  });
+
+  for await (const chunk of stream) {
+    const content = chunk.choices[0]?.delta?.content;
+    if (content) {
+      onChunk(content);
+    }
+  }
+}
+
+// 2. Exponential backoff retry:
+async function callOpenAIWithRetry(
+  fn: () => Promise<any>,
+  maxRetries = 3
+): Promise<any> {
+  let attempt = 0;
+  while (attempt < maxRetries) {
+    try {
+      return await fn();
+    } catch (error) {
+      attempt++;
+      if (attempt >= maxRetries) throw error;
+
+      const delay = Math.min(1000 * Math.pow(2, attempt), 10000);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+}
+
+// 3. Prompt caching (новая фича OpenAI):
+const response = await openai.chat.completions.create({
+  model: 'gpt-4o-mini',
+  messages: [
+    {
+      role: 'system',
+      content: systemPrompt,
+      // Пометить для кэширования:
+      cache_control: { type: 'ephemeral' }
+    },
+    ...userMessages
+  ],
+});
+```
+
+### 7. Type Safety Improvements
+
+**Текущая оценка:**
+- ✅ Хорошо: AssistantType enum
+- ✅ Хорошо: Supabase types в lib/supabase/types.ts
+- ⚠️ Улучшить: Type guards для runtime проверок
+- ⚠️ Улучшить: Discriminated unions для messages
+
+**Рекомендации:**
+```typescript
+// 1. Type guards для FAQ messages:
+interface BaseChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+}
+
+interface FAQMessage extends BaseChatMessage {
+  agent: 'faq';
+  citations: Citation[];
+  trace?: {
+    context_chunks: number;
+    similarity_avg: number;
+  };
+}
+
+interface RegularMessage extends BaseChatMessage {
+  agent: Exclude<AssistantType, 'faq'>;
+  citations?: never;
+}
+
+type ChatMessage = FAQMessage | RegularMessage;
+
+// Type guard:
+function isFAQMessage(msg: ChatMessage): msg is FAQMessage {
+  return msg.agent === 'faq' && 'citations' in msg;
+}
+
+// 2. Строгие типы для Supabase:
+type ProfileRow = Database['public']['Tables']['profiles']['Row'];
+type ProfileInsert = Database['public']['Tables']['profiles']['Insert'];
+type ProfileUpdate = Database['public']['Tables']['profiles']['Update'];
+
+// 3. Zod validation для API:
+import { z } from 'zod';
+
+const FAQRequestSchema = z.object({
+  session_id: z.string().uuid(),
+  user_message: z.string().min(1).max(500),
+  user_role: z.enum(['гость', 'пассажир', 'матрос']),
+  prefs: z.object({
+    lang: z.enum(['ru', 'en']),
+  }),
+});
+
+export type FAQRequest = z.infer<typeof FAQRequestSchema>;
+```
+
+### 8. Security & RLS Enhancements
+
+**Проверить:**
+- RLS политики для всех таблиц
+- API key безопасность в Edge Functions
+- Input validation для user messages
+- Rate limiting для guest users
+
+**Рекомендации:**
+```sql
+-- Проверить RLS для новых таблиц:
+
+-- knowledge_chunks (public read, admin write)
+create policy "Public can read knowledge chunks"
+on knowledge_chunks for select
+using (true);
+
+create policy "Only admins can modify knowledge chunks"
+on knowledge_chunks for all
+using (auth.jwt() ->> 'role' = 'admin');
+
+-- chat_messages (users own messages)
+create policy "Users can access own chat messages"
+on chat_messages for all
+using (
+  session_id in (
+    select id from chat_sessions
+    where user_id = auth.uid()
+  )
+);
+
+-- Rate limiting для email_leads:
+create or replace function check_email_rate_limit(
+  email text
+) returns boolean
+language plpgsql security definer
+as $$
+declare
+  recent_count int;
+begin
+  select count(*) into recent_count
+  from email_leads
+  where email = check_email_rate_limit.email
+    and created_at > now() - interval '1 hour';
+
+  return recent_count < 3; -- max 3 submissions per hour
+end;
+$$;
+```
+
+### 9. Performance Monitoring
+
+**Добавить метрики:**
+```typescript
+// 1. Supabase query timing:
+const startTime = Date.now();
+const { data, error } = await supabase
+  .from('profiles')
+  .select('*');
+const queryTime = Date.now() - startTime;
+
+if (queryTime > 1000) {
+  console.warn(`Slow query: profiles SELECT took ${queryTime}ms`);
+}
+
+// 2. OpenAI API latency:
+const metrics = {
+  embedding_time: 0,
+  search_time: 0,
+  llm_time: 0,
+  total_time: 0,
+};
+
+// 3. Component render tracking:
+if (process.env.NODE_ENV === 'development') {
+  const renderStart = performance.now();
+  // component render
+  const renderTime = performance.now() - renderStart;
+  if (renderTime > 16) { // > 1 frame
+    console.warn(`Slow render: ${componentName} took ${renderTime}ms`);
+  }
+}
+```
+
+---
+
+## 🎯 Priority Roadmap with Claude 4.5
+
+### Quick Wins (можно сделать за 1-2 дня):
+1. ✅ **React.memo для ChatBox** - уменьшить re-renders
+2. ✅ **Type guards для FAQ** - безопасность citations
+3. ✅ **Supabase query optimization** - select только нужные поля
+4. ✅ **Min similarity threshold** - для match_docs функции
+
+### Medium Priority (следующие 1-2 спринта):
+1. 🎯 **Context splitting** - разделить AppContext на 4 контекста
+2. 🎯 **Streaming responses** - реализовать для chat API
+3. 🎯 **Embeddings cache** - кэш для частых вопросов
+4. 🎯 **Error retry logic** - exponential backoff для OpenAI
+5. 🎯 **RLS audit** - проверить все политики безопасности
+
+### Long Term (планирование Phase 9+):
+1. 📋 **Multi-agent orchestration** - мета-агент с под-агентами
+2. 📋 **Advanced RAG** - reranking и hybrid search
+3. 📋 **Performance monitoring** - dashboard с метриками
+4. 📋 **Code splitting** - lazy loading для route groups
+5. 📋 **Redis cache** - для production deployment
+
+---
+
 *Документ поддерживается в актуальном состоянии для эффективной разработки*
-*Последнее обновление: 2025-01-22 (Phase 7.0 Content Pages & Community Links)*
+*Последнее обновление: 2025-01-31 (добавлены Claude 4.5 рекомендации)*

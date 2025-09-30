@@ -650,6 +650,205 @@ const systemPrompt = `Ты FAQ ассистент DAOsail — строгий и 
 
 ---
 
+## 🚀 Claude 4.5 Capabilities & Next.js Optimizations
+
+**Версия модели:** claude-sonnet-4-5-20250929
+**Дата обновления возможностей:** 2025-01-31
+
+### 🎯 Новые возможности для DAOsail проекта
+
+#### 1. Next.js App Router Expertise
+**Что изменилось:**
+- Более точное понимание Server/Client Components boundaries
+- Лучший анализ зависимостей между route groups и layouts
+- Меньше ошибок с hydration и 'use client' директивами
+
+**Применение к проекту:**
+```typescript
+// Теперь лучше понимаю такие паттерны:
+app/(auth)/layout.tsx → Server Component
+  ├── app/(auth)/login/page.tsx → Server Component
+  └── components/ui/email-capture.tsx → 'use client' (есть useState)
+
+// Правильная оптимизация:
+// ❌ Избегать
+const ClientComponent = () => {
+  const { theme, language, user } = useAppContext(); // re-render при ЛЮБОМ изменении
+}
+
+// ✅ Оптимально
+const ClientComponent = () => {
+  const theme = useAppContext(ctx => ctx.theme); // selective subscription
+  const language = useAppContext(ctx => ctx.language);
+}
+```
+
+#### 2. React Context Optimization
+**Улучшения:**
+- Точнее определяю места для context splitting
+- Лучше работаю с Context + localStorage patterns
+- Меньше промахов с re-render optimization
+
+**Рекомендации для AppContext:**
+```typescript
+// Можно разделить AppContext на меньшие контексты:
+// 1. ThemeContext (theme, toggleTheme)
+// 2. AuthContext (user, isAuthenticated, login, logout)
+// 3. GuestContext (responsesLeft, guestStage, captureEmail)
+// 4. LocaleContext (language, toggleLanguage)
+
+// Это уменьшит re-renders когда меняется только один аспект
+```
+
+#### 3. Database & Supabase Patterns
+**Что улучшилось:**
+- Точнее работаю с RLS policies и PostgreSQL functions
+- Лучше понимаю pgvector и RAG architecture
+- Меньше ошибок с Supabase TypeScript types
+
+**Паттерн для DAOsail:**
+```typescript
+// Type-safe Supabase queries:
+const { data: profiles } = await supabase
+  .from('profiles')
+  .select('id, full_name, nickname, role, avatar_url')
+  .eq('role', 'матрос')
+  .order('join_date', { ascending: false });
+
+// RLS проверка безопасности:
+// CREATE POLICY "Users can only update own profile"
+// ON profiles FOR UPDATE
+// USING (auth.uid() = id);
+```
+
+#### 4. OpenAI API & RAG Best Practices
+**Улучшения:**
+- Лучше понимаю RAG pipeline optimization
+- Точнее работаю с embeddings и vector search
+- Правильнее обрабатываю streaming responses
+
+**Рекомендации для FAQ Agent:**
+```typescript
+// Оптимизация vector search:
+// 1. Cache embeddings для часто задаваемых вопросов
+// 2. Batch операции для множественных queries
+// 3. Adjustable similarity threshold по ролям
+
+// Streaming optimization:
+const stream = await openai.chat.completions.create({
+  model: 'gpt-4o-mini',
+  messages: [...],
+  stream: true, // ← добавить для лучшего UX
+});
+```
+
+#### 5. TypeScript Type Safety
+**Что улучшилось:**
+- Точнее генерирую типы из Supabase schema
+- Лучше работаю с discriminated unions (AssistantType)
+- Меньше промахов с JSONB типизацией
+
+**Пример для DAOsail:**
+```typescript
+// Строгая типизация для chat messages:
+type ChatMessage = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  agent?: AssistantType;
+  citations?: Citation[]; // для FAQ агента
+  meta?: {
+    trace_id?: string;
+    context_used?: boolean;
+  };
+};
+
+// Type guard для безопасности:
+function isFAQMessage(msg: ChatMessage): msg is ChatMessage & { citations: Citation[] } {
+  return 'citations' in msg && Array.isArray(msg.citations);
+}
+```
+
+#### 6. Component Performance Patterns
+**Новые рекомендации:**
+- Лучше применяю React.memo для дорогих компонентов
+- Точнее определяю места для useMemo/useCallback
+- Меньше лишних re-renders в сложных UI
+
+**Анализ для DAOsail:**
+```typescript
+// Оптимизировать компоненты:
+// 1. ChatBox → много state, нужен memo
+// 2. AssistantDock → scroll events, нужна debounce
+// 3. ProfileInfoTab → real-time updates, selective subscriptions
+
+// Пример оптимизации:
+const ChatBox = React.memo(({ assistantType, onBack }) => {
+  const sendMessage = useCallback((msg: string) => {
+    // ... logic
+  }, [assistantType]); // зависимости только нужные
+
+  const messages = useMemo(
+    () => filterMessagesByAssistant(allMessages, assistantType),
+    [allMessages, assistantType]
+  );
+
+  return <div>...</div>;
+});
+```
+
+### 📊 Рекомендации по применению к DAOsail
+
+#### Для текущих задач:
+- ✅ **Context splitting** - разделить AppContext на тематические контексты
+- ✅ **Component memoization** - добавить React.memo к ChatBox, AssistantSelector
+- ✅ **Type guards** - добавить для FAQMessage, ProfileData
+- ✅ **Streaming responses** - реализовать для лучшего UX
+
+#### Для новых фичей (Phase 9+):
+- 🎯 **Multi-agent orchestration** - правильная архитектура с type safety
+- 🎯 **Advanced caching** - Redis для embeddings и frequent queries
+- 🎯 **Real-time optimizations** - Supabase subscriptions с debounce
+- 🎯 **Bundle splitting** - Code splitting для Route Groups
+
+### 🔍 Диагностические возможности для DAOsail
+
+**Что теперь могу делать лучше:**
+- Анализировать Supabase query performance
+- Находить проблемы с RLS policies до runtime
+- Предлагать оптимизации RAG pipeline
+- Обнаруживать потенциальные hydration errors
+
+### 💡 Workflow улучшения для спринтов
+
+**Новый подход к разработке DAOsail:**
+```
+1. Анализ архитектуры (точнее понимаю Next.js patterns)
+2. Планирование с учетом типов (меньше Supabase ошибок)
+3. Реализация с оптимизацией (Context splitting, memo)
+4. Ревью безопасности (RLS, type guards)
+5. Документирование (структурированно в CLAUDE.md + PROJECT_ARCHITECTURE.md)
+```
+
+### 🎯 Priority Optimizations для DAOsail
+
+#### Quick Wins (1-2 дня):
+1. **React.memo для ChatBox** - уменьшить re-renders
+2. **Type guards для FAQ** - безопасность citations
+3. **Streaming responses** - улучшить UX чата
+
+#### Medium Priority (следующие спринты):
+1. **Context splitting** - разделить AppContext
+2. **Vector search cache** - Redis для embeddings
+3. **Component lazy loading** - Code splitting
+
+#### Long Term (планирование):
+1. **Multi-agent orchestration**
+2. **Advanced RAG with reranking**
+3. **Performance monitoring dashboard**
+
+---
+
 *Этот файл должен обновляться при каждом завершении спринта*
 *Цель: циклическая разработка с обязательным обновлением документации*
-*Последнее обновление: 2025-09-26 (v0.8.1 FAQ Agent MVP Complete)*
+*Последнее обновление: 2025-01-31 (добавлены Claude 4.5 capabilities)*
