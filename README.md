@@ -1,7 +1,7 @@
 # DAOsail Prototype
 
-**Version:** 0.8.0
-**Status:** Active Development - Phase 8.0 started (Database Fixes & Email Integration)
+**Version:** 0.8.3
+**Status:** Active Development - Phase 8.3 Steward RAG Integration (базовая версия завершена)
 
 A Next.js-based prototype for DAOsail - an educational platform combining sailing knowledge with DAO governance and AI assistance.
 
@@ -101,16 +101,19 @@ Required variables (see `.env.example`):
 
 ## 🚦 Current Status
 
-**Phase 7.1 Completed** (January 2025):
-- ✅ File upload system implementation
-- ✅ Content pages and community links
-- ✅ Assistant system redesign
-- ✅ Navigation and routing improvements
+**Phase 8.3 Completed** (October 2025):
+- ✅ Cloned daosail-kb repository with 29 markdown documents
+- ✅ Created `scripts/rebuild-steward-knowledge.mjs` for KB loading
+- ✅ Loaded 17 chunks with embeddings (charter, faq, yachting, decentralization)
+- ✅ RAG search working with 80-91% similarity rates
+- ✅ Steward assistant answering from knowledge base
+- ✅ Citations display implemented
+- ⚠️ Known limitation: Shallow answers due to small chunks (needs optimization)
 
-**Next Phases**:
-- Phase 8.0: RAG system with pgvector
-- Phase 8.1: Enhanced role-based gating
-- Phase 8.2: Production security hardening
+**Recently Completed**:
+- Phase 8.2: FAQ Agent Unification with chunks table
+- Phase 8.1: FAQ Agent MVP with RAG search
+- Phase 8.0: Database fixes & Email integration
 
 ## 🤝 Development
 

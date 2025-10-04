@@ -14,8 +14,7 @@ export type AssistantType =
   | 'dao_advisor'    // Шкипер ДАО - советник по DAO
   | 'ai_guide'       // Шкипер Партнер (главный) - гид по ИИ
   | 'personal'       // Шкипер Компаньон - личный ассистент
-  | 'steward'        // Стюард - сервисные функции
-  | 'faq';           // FAQ ассистент - отвечает только по базе знаний
+  | 'steward';       // Стюард - встречает гостей и отвечает по базе знаний
 
 export interface Assistant {
   id: AssistantType;
@@ -140,20 +139,6 @@ export const assistants: Assistant[] = [
     color: 'from-gray-500 to-slate-500',
     specialization: 'Administrative support and services',
     specializationRu: 'Административная поддержка и услуги',
-    available: true,
-  },
-  {
-    id: 'faq',
-    title: 'FAQ Assistant',
-    titleRu: 'FAQ Ассистент',
-    description: 'Answers questions based only on knowledge base content',
-    descriptionRu: 'Отвечает на вопросы только на основе базы знаний',
-    role: 'FAQ Bot',
-    roleRu: 'FAQ Бот',
-    icon: HelpCircle,
-    color: 'from-green-500 to-emerald-500',
-    specialization: 'Knowledge base search and answers',
-    specializationRu: 'Поиск по базе знаний и ответы',
     available: true,
   },
 ];

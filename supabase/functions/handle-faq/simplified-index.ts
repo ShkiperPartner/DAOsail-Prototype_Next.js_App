@@ -1,6 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
-import { corsHeaders } from '../_shared/cors.ts';
+
+// CORS headers inline
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, GET, OPTIONS, PUT, DELETE',
+};
 
 // Environment validation
 function getEnvVar(name: string): string {
@@ -169,7 +175,7 @@ serve(async (req: Request) => {
     // 2. Get embedding for user question
     const queryEmbedding = await getEmbedding(user_message, openaiApiKey);
 
-    // 3. Search knowledge base (using chunks table with role-based access)
+    // 3. Search knowledge base (using existing chunks table with role-based access)
     const userRoles = [user_role, 'public']; // Always include 'public' for basic access
     const { data: matches, error: searchError } = await supabase.rpc('match_chunks_docs', {
       query_embedding: queryEmbedding,

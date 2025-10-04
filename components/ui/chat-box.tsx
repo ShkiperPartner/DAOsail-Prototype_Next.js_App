@@ -131,47 +131,7 @@ export function ChatBox({
     }
   }, [assistantType, isAuthenticated, language, existingSessionId]);
 
-  // Helper function for FAQ response
-  const handleFAQResponse = async (userMessage: string, userRole: string): Promise<ChatMessage | null> => {
-    try {
-      const response = await fetch('/api/faq', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          session_id: sessionId,
-          user_message: userMessage,
-          user_role: userRole.toLowerCase(),
-          prefs: { lang: language }
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.details || errorData.error || `HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      const aiMessage: ChatMessage = {
-        role: 'assistant',
-        content: data.final_text,
-        timestamp: new Date().toISOString(),
-        assistantType: 'faq' as AssistantType,
-        citations: data.citations,
-        trace: data.trace
-      };
-
-      setMessages(prev => [...prev, aiMessage]);
-      return aiMessage;
-    } catch (error) {
-      console.error('FAQ API error:', error);
-      throw error;
-    }
-  };
-
-  // Helper function for streaming response (fallback)
+  // Helper function for streaming response
   const handleStreamingResponse = async (newMessages: ChatMessage[], userRole: string, userId?: string): Promise<ChatMessage | null> => {
     try {
       setIsStreaming(true);
@@ -297,15 +257,8 @@ export function ChatBox({
         }
       }
 
-      // Use FAQ agent if assistant type is 'faq'
-      let aiResponse: ChatMessage | null = null;
-
-      if (assistantType === 'faq') {
-        aiResponse = await handleFAQResponse(messageToSend, userRole);
-      } else {
-        // Use streaming for other assistants
-        aiResponse = await handleStreamingResponse(newMessages, userRole, userId);
-      }
+      // Use streaming for all assistants (including steward with RAG)
+      const aiResponse = await handleStreamingResponse(newMessages, userRole, userId);
 
       // Save AI response to persistent storage
       if (isAuthenticated && sessionId && !sessionId.startsWith('local-') && !sessionId.startsWith('guest-') && aiResponse) {

@@ -3,7 +3,7 @@
 **Проект:** DAOsail Prototype - Next.js App  
 **Цель:** Мета-инструкции для эффективной работы с DAOsail проектом  
 **Дата создания:** 2025-01-14
-**Последнее обновление:** 2025-09-26 (v0.8.1 - FAQ Agent MVP)
+**Последнее обновление:** 2025-10-02 (v0.8.3 - Steward RAG Integration в процессе)
 
 ---
 
@@ -849,6 +849,613 @@ const ChatBox = React.memo(({ assistantType, onBack }) => {
 
 ---
 
-*Этот файл должен обновляться при каждом завершении спринта*
+## 🆕 Обновления версии 0.8.2 (2025-10-01)
+
+### FAQ Agent Unification - Паттерны:
+
+#### **Unified Chunks Table Pattern:**
+```typescript
+// Одна таблица для всех embeddings вместо дублирования
+chunks: {
+  id bigserial,
+  source text,          // 'docs', 'manual', etc.
+  path text,            // 'docs/spec/architecture.md'
+  content text,         // текст чанка
+  embedding vector(1536),
+  metadata jsonb,       // дополнительная информация
+  accessible_roles text[] DEFAULT ['public'],  // role-based access
+  tags text[] DEFAULT []                       // тематические теги
+}
+
+// Вместо отдельной таблицы knowledge_chunks
+// Избегаем дублирования данных и embeddings
+```
+
+#### **Role-Based Vector Search Pattern:**
+```sql
+-- RPC функция с role filtering
+CREATE FUNCTION match_chunks_docs(
+  query_embedding VECTOR(1536),
+  match_count INT DEFAULT 8,
+  roles TEXT[] DEFAULT ARRAY['public'],
+  min_similarity FLOAT DEFAULT 0.75
+) RETURNS TABLE (...) AS $$
+  SELECT ...
+  FROM chunks
+  WHERE chunks.accessible_roles && roles  -- PostgreSQL array overlap operator
+    AND (1 - (chunks.embedding <=> query_embedding)) >= min_similarity
+  ...
+$$;
+```
+
+#### **Edge Function Migration Pattern:**
+```typescript
+// Было (knowledge_chunks):
+const { data: matches } = await supabase.rpc('match_docs', {
+  query_embedding,
+  match_count: 5,
+  roles,
+  min_similarity: 0.7
+});
+
+// Стало (chunks):
+const { data: matches } = await supabase.rpc('match_chunks_docs', {
+  query_embedding,
+  match_count: 5,
+  roles: userRoles,
+  min_similarity: 0.7
+});
+
+// Mapping результатов:
+// match.text → match.content
+// match.doc_id → match.path
+// match.chunk_idx → match.metadata?.chunk || 0
+```
+
+### Частые проблемы и решения v0.8.2:
+
+**Port mismatch в .env:**
+**Проблема:** NEXT_PUBLIC_APP_URL=http://localhost:3002 но dev сервер на :3000
+**Решение:** Синхронизировать порты - либо обновить .env.local, либо запустить `npm run dev -- -p 3002`
+**Файл:** `.env.local` line 13
+
+**API Error 500 в /api/faq:**
+**Проблема:** POST /api/faq возвращает Internal Server Error
+**Возможные причины:**
+1. Edge Function не задеплоен после изменений
+2. Несоответствие схемы ответа match_chunks_docs
+3. CORS проблемы из-за port mismatch
+**Решение:** Deploy Edge Function: `supabase functions deploy handle-faq --project-ref <project-id>`
+
+**Migration уже применена но не видна в коде:**
+**Проблема:** Индексы idx_chunks_accessible_roles существуют, но миграция не в migrations/
+**Решение:** Миграции были применены вручную в Supabase SQL Editor. Для истории создать migration файл задним числом
+**Файл:** `supabase/migrations/20250928000001_add_role_tags_to_chunks.sql` (уже есть в untracked)
+
+### Database Verification Patterns:
+
+```sql
+-- Проверка структуры таблицы
+SELECT column_name, data_type, is_nullable
+FROM information_schema.columns
+WHERE table_name = 'chunks'
+ORDER BY ordinal_position;
+
+-- Проверка индексов
+SELECT indexname, indexdef
+FROM pg_indexes
+WHERE tablename = 'chunks';
+
+-- Проверка RPC функций
+SELECT proname, pg_get_function_arguments(oid)
+FROM pg_proc
+WHERE proname LIKE 'match_%';
+
+-- Статистика по ролям
+SELECT accessible_roles, tags, COUNT(*)
+FROM chunks
+GROUP BY accessible_roles, tags
+LIMIT 10;
+```
+
+### Deployment Checklist для FAQ Agent:
+
+- [ ] Обновить Edge Function локально
+- [ ] Проверить ENV переменные (OPENAI_API_KEY, SUPABASE_SERVICE_ROLE_KEY)
+- [ ] Задеплоить Edge Function: `supabase functions deploy handle-faq`
+- [ ] Проверить логи Edge Function: `supabase functions logs handle-faq`
+- [ ] Тестировать API endpoint: POST /api/faq с тестовым вопросом
+- [ ] Проверить citations в UI
+- [ ] Убедиться что role-based filtering работает
+
+---
+
+## 🆕 Обновления версии 0.8.3 (2025-10-02)
+
+### Steward RAG Integration - Паттерны:
+
+#### **RAG Integration in Streaming API:**
+```typescript
+// Паттерн: Добавление RAG поиска в существующий /api/chat
+async function getRelevantContext(
+  userMessage: string,
+  assistantType: 'navigator' | 'skipper' | 'steward',
+  userRole: string,
+  language: 'ru' | 'en'
+): Promise<{ context: string; chunksUsed: number; citations: any[] }> {
+
+  // Для steward используем RAG поиск
+  if (assistantType === 'steward') {
+    const { data: matches } = await supabase.rpc('match_chunks_docs', {
+      query_embedding: await getEmbedding(userMessage),
+      match_count: 5,
+      roles: [userRole.toLowerCase(), 'public'],
+      min_similarity: 0.7
+    });
+
+    // Формируем контекст и citations
+    const context = matches.map((m, idx) =>
+      `[${idx + 1}] ${m.content}\n(Источник: ${m.path}, релевантность: ${Math.round(m.similarity * 100)}%)`
+    ).join('\n\n');
+
+    const citations = matches.map(m => ({
+      doc_id: m.path,
+      url: null,
+      chunk_idx: m.metadata?.chunk || 0,
+      similarity: m.similarity
+    }));
+
+    return { context, chunksUsed: matches.length, citations };
+  }
+}
+```
+
+#### **Prompt Engineering for Knowledge-Based Assistant:**
+```typescript
+const stewardPrompt = {
+  ru: `Ты - Стюард DAOsail, дружелюбный и гостеприимный помощник.
+
+  🎯 ГЛАВНОЕ ПРАВИЛО: Отвечай ТОЛЬКО на основе предоставленного контекста из базы знаний.
+
+  📋 ИНСТРУКЦИИ ПО СТИЛЮ:
+  • Тон: тёплый, гостеприимный, профессиональный
+  • Стиль: можешь формулировать своими словами, добавлять приветствия
+  • Структура: делай ответы понятными (списки, абзацы)
+  • Ссылки: можешь упоминать источники [1], [2]
+
+  ⚠️ ОГРАНИЧЕНИЯ:
+  • Если информации НЕТ → "К сожалению, у меня нет информации"
+  • НИКОГДА не выдумывай факты, даты, цифры
+  • НЕ добавляй информацию из общих знаний
+
+  Предоставленный контекст:
+  ${contextResult.context || 'Контекст не найден'}`,
+};
+```
+
+#### **Citations in Streaming Mode:**
+```typescript
+// Паттерн: Возврат citations в finish event
+if (chunk.choices[0]?.finish_reason) {
+  const finishData = {
+    type: 'finish',
+    message: {
+      role: 'assistant',
+      content: fullContent,
+      citations: contextResult.citations || [],  // Добавляем citations
+      metadata: {
+        knowledgeChunksUsed: contextResult.chunksUsed
+      }
+    }
+  };
+  controller.enqueue(encoder.encode(`data: ${JSON.stringify(finishData)}\n\n`));
+}
+```
+
+#### **Logging Pattern for RAG Debugging:**
+```typescript
+// Паттерн: Подробное логирование для диагностики
+if (assistantType === 'steward') {
+  console.log('🔍 [STEWARD RAG] Starting search...');
+  console.log('🔍 [STEWARD RAG] User message:', userMessage.substring(0, 100));
+  console.log('🔍 [STEWARD RAG] User role:', userRole);
+  console.log('🔍 [STEWARD RAG] Search roles:', userRoles);
+
+  const { data: matches, error } = await supabase.rpc('match_chunks_docs', {...});
+
+  if (error) {
+    console.error('❌ [STEWARD RAG] Knowledge search error:', error);
+  }
+
+  console.log('🔍 [STEWARD RAG] Matches found:', matches?.length || 0);
+  console.log('✅ [STEWARD RAG] Top match similarity:', matches[0]?.similarity);
+}
+```
+
+### Частые проблемы и решения v0.8.3:
+
+**Ассистент отвечает не по базе знаний:**
+**Проблема:** Steward отвечает общими знаниями, игнорируя контекст
+**Возможные причины:**
+1. Таблица `chunks` пустая - нет данных для RAG
+2. Функция `match_chunks_docs()` не существует
+3. RAG поиск падает с ошибкой, возвращается пустой контекст
+4. OpenAI embeddings не генерируются
+
+**Диагностика:**
+```typescript
+// Проверить наличие данных
+const { data: chunks, count } = await supabase
+  .from('chunks')
+  .select('*', { count: 'exact', head: true });
+console.log('Total chunks:', count);
+
+// Проверить RPC функцию
+const { data, error } = await supabase.rpc('match_chunks_docs', {
+  query_embedding: testEmbedding,
+  match_count: 3,
+  roles: ['public'],
+  min_similarity: 0.1
+});
+console.log('RPC test:', error ? error : `Found ${data?.length} results`);
+```
+
+**Migration user_chats.session_id not applied:**
+**Проблема:** `column user_chats.session_id does not exist`
+**Решение:** Применить SQL в Supabase Dashboard:
+```sql
+ALTER TABLE user_chats ADD COLUMN IF NOT EXISTS session_id UUID DEFAULT gen_random_uuid();
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_chats_session_id ON user_chats(session_id);
+```
+**Файл:** `FIX_USER_CHATS_SESSION_ID.sql`
+
+**RAG search returns empty results:**
+**Проблема:** match_chunks_docs() возвращает 0 результатов
+**Возможные причины:**
+1. min_similarity слишком высокий (0.7)
+2. accessible_roles не содержит 'public'
+3. Embeddings не синхронизированы
+
+**Решение:** Понизить min_similarity до 0.3 для диагностики:
+```typescript
+const { data: matches } = await supabase.rpc('match_chunks_docs', {
+  query_embedding: queryEmbedding,
+  match_count: 5,
+  roles: ['public'],  // Всегда включать 'public'
+  min_similarity: 0.3  // Временно снизить
+});
+```
+
+---
+
+## 🚧 Обновления версии 0.8.3 (continued) - 2025-10-03
+
+### Knowledge Base Rebuild - Текущее состояние:
+
+#### **Диагностика выявила проблему:**
+```
+✅ chunks таблица содержит 303 записи
+✅ match_chunks_docs() функция существует
+❌ RAG поиск возвращает 0 результатов (similarity threshold 0.7)
+❓ Состояние embeddings неизвестно (требуется проверка)
+```
+
+#### **Принятые архитектурные решения:**
+
+**1. Steward доступ к знаниям:**
+```
+ТОЛЬКО публичная информация:
+✓ docs/charter/philosophy.md
+✓ docs/charter/roles.md
+✓ docs/charter/economics.md
+
+ИСКЛЮЧЕНО:
+✗ docs/ai_agents/* (промпты ассистентов)
+✗ docs/spec/* (техническая документация)
+```
+
+**2. Роли доступа (поэтапное внедрение):**
+```javascript
+// Фаза 1 (сейчас):
+'guest'      // Неавторизованный пользователь
+'public'     // Интересующийся (базовая регистрация)
+'passenger'  // Первый уровень, зарегистрированные участники
+
+// Фаза 2 (позже):
+'sailor'     // Технические знания
+'captain'    // Продвинутый уровень
+'partner'    // Административный доступ (вся БЗ)
+```
+
+**3. Маппинг ролей на доступ:**
+```typescript
+function mapUserRoleToKnowledgeRoles(userRole: string): string[] {
+  const roleMap = {
+    'guest': ['guest'],
+    'public': ['guest', 'public'],
+    'passenger': ['guest', 'public', 'passenger'],
+    // Позже: sailor, captain, partner
+  };
+  return roleMap[userRole.toLowerCase()] || ['guest'];
+}
+```
+
+#### **Запланированные изменения:**
+
+**Единый pipeline базы знаний:**
+```
+1. Исходники (GitHub repo docs/)
+   ↓
+2. Скрипт обработки (scripts/rebuild-steward-knowledge.mjs)
+   - Чанкование (600 tokens, overlap 100)
+   - Embedding generation (OpenAI ada-002)
+   - Метаданные (source, path, roles, tags)
+   ↓
+3. chunks таблица с embeddings
+   ↓
+4. RAG поиск (match_chunks_docs)
+   ↓
+5. Steward ответы по контексту
+```
+
+**Структура скрипта загрузки:**
+```javascript
+// scripts/rebuild-steward-knowledge.mjs
+
+const STEWARD_SOURCES = [
+  'docs/charter/philosophy.md',
+  'docs/charter/roles.md',
+  'docs/charter/economics.md'
+];
+
+const STEWARD_ROLES = ['guest', 'public', 'passenger'];
+
+// Процесс:
+1. Очистить существующие chunks для Steward
+2. Для каждого файла из STEWARD_SOURCES:
+   - Парсить frontmatter
+   - Чанковать текст
+   - Генерировать embeddings
+   - Upsert в chunks с accessible_roles = STEWARD_ROLES
+3. Валидация: проверить что embeddings созданы
+4. Тест RAG поиска
+```
+
+**Улучшенный промпт Steward:**
+```typescript
+const stewardPrompt = `Ты - Шкипер-Администратор DAOsail, гостеприимный помощник для новичков.
+
+🎯 ДОСТУП К ЗНАНИЯМ:
+У тебя есть доступ только к базовой публичной информации:
+• Философия и миссия проекта
+• Роли и права участников
+• Основы экономической модели
+
+📋 ПРАВИЛА ОТВЕТОВ:
+• Отвечай ТОЛЬКО на основе предоставленного контекста
+• Если информации НЕТ → "К сожалению, у меня нет доступа к этой информации"
+• НЕ выдумывай факты, даты, технические детали
+• Можешь формулировать своими словами, но строго по контексту
+• Упоминай источники [1], [2] когда уместно
+
+🎨 СТИЛЬ:
+• Тон: теплый, гостеприимный, профессиональный
+• Ты приветствуешь новичков в DAOsail как хороший администратор
+• Помогаешь сориентироваться в базовых концепциях проекта
+
+Контекст из базы знаний:
+${context}`;
+```
+
+#### **Следующие шаги (ОЖИДАНИЕ):**
+```
+⏸️ Получить URL GitHub репо с docs/ (или источник документов)
+⏸️ Решить: клонировать репо или создать локально
+⏸️ Создать скрипт rebuild-steward-knowledge.mjs
+⏸️ Загрузить БЗ с embeddings
+⏸️ Протестировать RAG поиск
+⏸️ Финальное тестирование через UI
+```
+
+---
+
+## ✅ Обновления версии 0.8.3 (ЗАВЕРШЕНО) - 2025-10-04
+
+### Knowledge Base Rebuild - Результаты реализации:
+
+#### **Что сделано:**
+
+**1. Инфраструктура базы знаний:**
+```bash
+# Клонирован KB репозиторий
+git clone https://github.com/ShkiperPartner/daosail-kb.git
+
+# Создан универсальный скрипт загрузки
+scripts/rebuild-steward-knowledge.mjs
+
+# Структура KB (29 markdown файлов):
+daosail-kb/docs/
+├── charter/        # Устав, философия, роли
+├── faq/            # Часто задаваемые вопросы
+├── yachting/       # Информация о яхтинге
+├── decentralization/ # DAO структура
+├── gov/            # Управление
+├── ops/            # Операции
+├── playbook/       # Руководства
+├── spec/           # Технические спецификации
+└── ai_agents/      # Промпты ассистентов
+```
+
+**2. Выбор источников для Steward (публичная БЗ):**
+```javascript
+const STEWARD_SOURCES = [
+  // Устав и философия
+  'charter/philosophy.md',
+  'charter/mission.md',
+  'charter/roles.md',
+  'charter/README.md',
+
+  // FAQ для новичков
+  'faq/general.md',
+  'faq/club.md',
+  'faq/membership.md',
+  'faq/yachting.md',
+  'faq/dao.md',
+  'faq/ai.md',
+  'faq/README.md',
+
+  // Яхтинг
+  'yachting/README.md',
+  'yachting/training.md',
+
+  // Децентрализация
+  'decentralization/dao.md'
+];
+
+const STEWARD_ROLES = ['guest', 'public', 'passenger'];
+```
+
+**3. Результаты загрузки:**
+```
+✅ 14 документов обработано
+✅ 17 chunks с embeddings загружено
+✅ Роли доступа: guest, public, passenger
+✅ Таблица: chunks (source='steward-kb')
+✅ RPC функция: match_chunks_docs() работает
+```
+
+**4. Тестирование RAG поиска:**
+```
+Вопрос: "Что такое DAOsail?"
+→ Similarity: 90.7% (faq/club.md)
+→ Similarity: 89.9% (faq/general.md)
+→ Similarity: 88.6% (faq/README.md)
+
+Вопрос: "Какая философия проекта?"
+→ Similarity: 80.3% (charter/philosophy.md)
+→ Similarity: 80.3% (charter/README.md)
+
+Вопрос: "Какие роли существуют?"
+→ Similarity: 88.9% (faq/membership.md)
+→ Similarity: 88.0% (charter/roles.md)
+```
+
+**5. UI Тестирование:**
+```
+✅ Steward отвечает на основе БЗ
+✅ Citations отображаются корректно
+⚠️ Ответы поверхностные (чанки маленькие)
+⚠️ Низкая специфика DAOsail как "клуба двух реальностей"
+```
+
+#### **Выявленные проблемы качества:**
+
+**Проблема: Слишком маленькие чанки**
+```
+Причина: Большинство документов → 1 chunk
+Последствие: Теряется контекст и глубина
+Пример: "Что такое DAOsail?" → общий ответ про яхт-клуб
+         вместо уникальной концепции "клуба двух реальностей"
+```
+
+**Решение (для следующей итерации):**
+```javascript
+// Увеличить chunk size
+chunkSize: 600 → 1200 tokens
+
+// Добавить semantic chunking
+- Разделение по смысловым блокам
+- Сохранение заголовков в чанках
+- Overlap с ключевыми концепциями
+
+// Обогащение метаданных
+metadata: {
+  section: 'Philosophy',
+  concepts: ['DAO', 'двойная реальность', 'Web3'],
+  importance: 'high'
+}
+```
+
+### Паттерны и лучшие практики v0.8.3:
+
+#### **Knowledge Base Loading Pattern:**
+```javascript
+// scripts/rebuild-steward-knowledge.mjs
+
+1. Определить источники (STEWARD_SOURCES)
+2. Очистить старые chunks (source='steward-kb')
+3. Для каждого файла:
+   - Читать markdown
+   - Очистить форматирование
+   - Чанковать текст (600 tokens, overlap 100)
+   - Генерировать embeddings (OpenAI ada-002)
+   - Добавить метаданные (roles, tags, path)
+4. Batch upload в chunks таблицу
+5. Валидация через RPC test
+```
+
+#### **Role-Based Knowledge Access:**
+```typescript
+// Маппинг пользовательских ролей на доступ к БЗ
+const getAccessibleRoles = (userRole: string): string[] => {
+  const roleHierarchy: Record<string, string[]> = {
+    'Интересующийся': ['public'],
+    'Пассажир': ['public', 'passenger'],
+    'Матрос': ['public', 'passenger', 'sailor'],
+    'Партнер': ['public', 'passenger', 'sailor', 'partner'],
+    'admin': ['public', 'passenger', 'sailor', 'partner', 'admin']
+  };
+  return roleHierarchy[role] || ['public'];
+};
+```
+
+#### **Chunking Strategy:**
+```javascript
+function chunkText(text, chunkSize, overlap) {
+  const words = text.split(/\s+/);
+  const chunks = [];
+
+  for (let i = 0; i < words.length; i += chunkSize - overlap) {
+    const chunk = words.slice(i, i + chunkSize).join(' ');
+    if (chunk.trim()) {
+      chunks.push(chunk.trim());
+    }
+  }
+
+  return chunks;
+}
+```
+
+### Частые проблемы и решения v0.8.3:
+
+**Embeddings не генерируются:**
+**Проблема:** OpenAI API ключ не загружен
+**Решение:**
+```bash
+OPENAI_API_KEY=sk-... node scripts/rebuild-steward-knowledge.mjs
+```
+
+**RAG поиск возвращает пустые результаты:**
+**Проблема:** similarity threshold слишком высокий
+**Решение:** Понизить min_similarity с 0.7 до 0.3 для диагностики
+```typescript
+const { data: matches } = await supabase.rpc('match_chunks_docs', {
+  query_embedding,
+  match_count: 5,
+  roles: ['public'],
+  min_similarity: 0.3  // Вместо 0.7
+});
+```
+
+**Ответы Steward не специфичны для DAOsail:**
+**Проблема:** Чанки слишком маленькие, теряется уникальный контекст
+**Решение (TODO):**
+- Увеличить chunk size до 1200 tokens
+- Semantic chunking по смысловым блокам
+- Добавить ключевые концепции в metadata
+
+---
+
+*Этот файл должен обновляется при каждом завершении спринта*
 *Цель: циклическая разработка с обязательным обновлением документации*
-*Последнее обновление: 2025-01-31 (добавлены Claude 4.5 capabilities)*
+*Последнее обновление: 2025-10-04 (v0.8.3 Steward KB + Claude 4.5 capabilities от 2025-01-31)*

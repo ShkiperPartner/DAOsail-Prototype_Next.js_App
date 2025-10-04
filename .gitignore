@@ -43,3 +43,7 @@ pnpm-debug.log*
 # --- Production / Deploy ---
 .vercel/
 .netlify/
+
+# --- Knowledge Base ---
+daosail-kb/
+chunks_rows.csv

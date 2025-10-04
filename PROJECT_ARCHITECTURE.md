@@ -1,9 +1,9 @@
 # Project Architecture Overview
 
 **Проект:** DAOsail Prototype - Next.js App
-**Версия:** 0.8.1
-**Дата обновления:** 2025-09-26
-**Статус:** Активная разработка - Phase 8.1 FAQ Agent MVP реализован
+**Версия:** 0.8.3
+**Дата обновления:** 2025-10-04
+**Статус:** Активная разработка - Phase 8.3 Steward RAG Integration (завершена базовая версия)
 
 ---
 
@@ -326,7 +326,7 @@ export function MyComponent() {
 - **Шкипер ДАО (DAO Advisor)** → управление DAO и голосование
 - **Шкипер Партнер (AI Guide)** → ИИ технологии и автоматизация [PREMIUM]
 - **Шкипер Компаньон (Personal)** → личная помощь и организация [AUTH REQUIRED]
-- **Стюард (Steward)** → административная поддержка и услуги
+- **Стюард (Steward)** → встречает гостей, отвечает строго по базе знаний с RAG поиском
 
 ### Mock Data (data/)
 **Назначение:** Fallback данные (больше не используются в чате)
@@ -527,6 +527,39 @@ User Click → Next.js Link →
 - [x] **Prompt Engineering** - Строгий промпт без галлюцинаций, только по базе знаний
 - [x] **TypeScript Integration** - Расширенные типы для FAQ messages с citations
 
+**Phase 8.2: FAQ Agent Unification (Завершена v0.8.2) ✅**
+- [x] **Database Analysis** - Проверка структуры существующих таблиц chunks и knowledge_documents
+- [x] **Chunks Table Extension** - Добавлены колонки accessible_roles[] и tags[] к таблице chunks
+- [x] **RPC Function Update** - match_chunks_docs() с role-based фильтрацией через chunks.accessible_roles && roles
+- [x] **Edge Function Refactoring** - Переключение handle-faq с knowledge_chunks на chunks таблицу
+- [x] **Data Migration Verification** - Проверено 85684+ записей с заполненными accessible_roles: ['public']
+- [x] **Edge Function Deployment** - Деплой обновленного handle-faq в Supabase
+- [x] **Environment Fixes** - Исправлено несоответствие портов (.env.local vs dev server)
+- [x] **Error Debugging** - Устранена ошибка 500 в POST /api/faq
+- [x] **End-to-End Testing** - Полное тестирование FAQ агента с реальными вопросами
+- [x] **Citations Verification** - Проверка отображения источников из chunks.path
+
+**Phase 8.3: Steward RAG Integration (Завершена v0.8.3) ✅**
+- [x] **RAG Search Implementation** - Добавлен векторный поиск в /api/chat для Steward
+- [x] **Steward Prompt Engineering** - Создан специальный промпт: строго по базе знаний + гибкая подача
+- [x] **Citations Support** - Добавлены citations (источники) для ответов Steward в streaming режиме
+- [x] **FAQ Assistant Removal** - Удален дублирующий FAQ помощник из системы (осталась только Edge Function)
+- [x] **Code Integration** - Steward теперь использует match_chunks_docs() RPC функцию
+- [x] **Logging Added** - Добавлено подробное логирование для диагностики RAG поиска
+- [x] **Database Migration Fix** - Применена миграция user_chats.session_id
+- [x] **KB Repository Clone** - Клонирован daosail-kb репозиторий в проект
+- [x] **Knowledge Base Script** - Создан scripts/rebuild-steward-knowledge.mjs для загрузки БЗ
+- [x] **KB Sources Definition** - Определены публичные источники (charter/, faq/, yachting/, decentralization/)
+- [x] **Embeddings Pipeline** - 17 chunks загружено с OpenAI embeddings (ada-002)
+- [x] **RPC Function Testing** - Протестирован match_chunks_docs() - similarity 80-91%
+- [x] **End-to-End Testing** - Проверка работы в UI показала базовую функциональность
+- [x] **Citation Display** - Citations отображаются корректно (пока не используются активно)
+
+**Известные ограничения:**
+- ⚠️ **Поверхностные ответы** - Чанки слишком маленькие (1-2 на документ), теряется контекст проекта
+- ⚠️ **Низкая специфика** - Ответы общие, без уникальных деталей DAOsail как "клуба двух реальностей"
+- 🔄 **Требуется оптимизация** - Нужно улучшить чанкование для более глубоких и специфичных ответов
+
 ### 📋 Планируется (Phase 9: Advanced RAG Features)
 - [ ] **Multi-agent Orchestration** - Мета-агент с под-агентами (Тренер, DAO, FAQ)
 - [ ] **Knowledge Base Expansion** - Загрузка полной базы знаний DAOsail
@@ -598,10 +631,11 @@ chat_search_index (
   search_vector tsvector, timestamps
 )
 
--- База знаний с vector embeddings (NEW v0.8.1!)
-knowledge_chunks (
-  id, doc_id, chunk_idx, text, embedding vector(1536),
-  accessible_roles text[], tags text[], url, updated_at
+-- База знаний с vector embeddings (UPDATED v0.8.2!)
+chunks (
+  id bigserial, source text, path text, content text,
+  embedding vector(1536), metadata jsonb,
+  accessible_roles text[], tags text[]
 )
 
 -- Сообщения FAQ агента (NEW v0.8.1!)
@@ -610,12 +644,15 @@ chat_messages (
 )
 ```
 
-### Vector Search & RAG System
+### Vector Search & RAG System (UPDATED v0.8.2)
 - **pgvector extension** включен для семантического поиска
 - **Embeddings model** OpenAI text-embedding-ada-002 (1536 dimensions)
-- **Search function** match_docs(query_embedding, match_count, roles[], min_similarity) с role-based доступом
+- **Search function** match_chunks_docs(query_embedding, match_count, roles[], min_similarity) с role-based доступом
+- **Unified chunks table** - Одна таблица для всех embeddings с role-based access control
 - **FAQ Agent** - Полноценный RAG-агент с citations и строгими guardrails против галлюцинаций
-- **Categories** sailing_basics, navigation, safety, weather, equipment, racing, etc.
+- **Role-based filtering** - chunks.accessible_roles && roles для безопасного доступа к знаниям
+- **Data volume** - 85684+ чанков документации с полными embeddings
+- **Tags support** - Фильтрация по темам (sailing, navigation, dao, architecture, etc.)
 - **Languages** поддержка ru/en контента
 
 ### Navigation & Chat Search Functions (NEW v0.6.0)

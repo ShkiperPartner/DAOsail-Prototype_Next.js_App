@@ -9,13 +9,13 @@ const openai = new OpenAI({
   apiKey: validateOpenAI(),
 });
 
-// Функция для поиска релевантного контекста с учетом роли пользователя
+// Функция для поиска релевантного контекста с учетом роли пользователя (RAG)
 async function getRelevantContext(
   userMessage: string,
-  assistantType: 'navigator' | 'skipper',
+  assistantType: 'navigator' | 'skipper' | 'steward',
   userRole: string = 'Интересующийся',
   language: 'ru' | 'en' = 'ru'
-): Promise<{ context: string; chunksUsed: number }> {
+): Promise<{ context: string; chunksUsed: number; citations: any[] }> {
   try {
     // Создаем embedding для пользовательского сообщения
     const embeddingResponse = await openai.embeddings.create({
@@ -39,17 +39,69 @@ async function getRelevantContext(
 
     const accessibleRoles = getAccessibleRoles(userRole);
 
-    // Определяем категории для каждого типа ассистента
+    const supabase = await createClient();
+
+    // Для steward используем RAG поиск по всей базе знаний (как FAQ)
+    if (assistantType === 'steward') {
+      console.log('🔍 [STEWARD RAG] Starting search...');
+      console.log('🔍 [STEWARD RAG] User message:', userMessage.substring(0, 100));
+      console.log('🔍 [STEWARD RAG] User role:', userRole);
+
+      const userRoles = [userRole.toLowerCase(), 'public'];
+      console.log('🔍 [STEWARD RAG] Search roles:', userRoles);
+
+      const { data: matches, error: searchError } = await supabase.rpc('match_chunks_docs', {
+        query_embedding: queryEmbedding,
+        match_count: 5,
+        roles: userRoles,
+        min_similarity: 0.7
+      });
+
+      if (searchError) {
+        console.error('❌ [STEWARD RAG] Knowledge search error:', searchError);
+        return { context: '', chunksUsed: 0, citations: [] };
+      }
+
+      console.log('🔍 [STEWARD RAG] Matches found:', matches?.length || 0);
+
+      if (!matches || matches.length === 0) {
+        console.log('⚠️  [STEWARD RAG] No matches found - will respond without context');
+        return { context: '', chunksUsed: 0, citations: [] };
+      }
+
+      console.log('✅ [STEWARD RAG] Top match similarity:', matches[0]?.similarity);
+
+      // Формируем контекст и citations
+      const context = matches
+        .map((match: any, idx: number) =>
+          `[${idx + 1}] ${match.content}\n(Источник: ${match.path}, релевантность: ${Math.round(match.similarity * 100)}%)`
+        )
+        .join('\n\n');
+
+      const citations = matches.map((match: any) => ({
+        doc_id: match.path,
+        url: null,
+        chunk_idx: match.metadata?.chunk || 0,
+        similarity: match.similarity,
+      }));
+
+      return {
+        context,
+        chunksUsed: matches.length,
+        citations
+      };
+    }
+
+    // Для остальных ассистентов (navigator, skipper) - старая логика
     const categoryMap = {
       navigator: ['sailing_basics', 'navigation', 'weather', 'equipment'],
       skipper: ['safety', 'crew_management', 'emergency', 'racing']
     };
 
-    const supabase = await createClient();
     let allResults: any[] = [];
 
     // Ищем по релевантным категориям с фильтрацией по ролям
-    for (const category of categoryMap[assistantType]) {
+    for (const category of categoryMap[assistantType as keyof typeof categoryMap]) {
       const { data } = await supabase.rpc('search_knowledge_documents_by_role', {
         query_embedding: queryEmbedding,
         match_threshold: 0.7,
@@ -65,7 +117,7 @@ async function getRelevantContext(
     }
 
     if (allResults.length === 0) {
-      return { context: '', chunksUsed: 0 };
+      return { context: '', chunksUsed: 0, citations: [] };
     }
 
     // Убираем дубликаты и сортируем по релевантности
@@ -86,12 +138,13 @@ async function getRelevantContext(
 
     return {
       context: `${contextHeader}\n\n${contextParts.join('\n\n---\n\n')}`,
-      chunksUsed: uniqueResults.length
+      chunksUsed: uniqueResults.length,
+      citations: []
     };
 
   } catch (error) {
     console.error('Error getting relevant context:', error);
-    return { context: '', chunksUsed: 0 };
+    return { context: '', chunksUsed: 0, citations: [] };
   }
 }
 
@@ -161,6 +214,48 @@ export async function POST(request: NextRequest) {
         ${contextResult.context ? 'IMPORTANT: Use the information from the knowledge base below for more accurate answers, but don\'t reference it directly. Answer naturally as if it\'s your own knowledge.' : ''}
 
         Always emphasize the importance of safety and responsible approach to sailing.`
+      },
+      steward: {
+        ru: `Ты - Стюард DAOsail, дружелюбный и гостеприимный помощник по проекту DAOsail.
+        Твоя задача - приветствовать новых посетителей и отвечать на их вопросы о клубе, проекте, яхтинге и Web3.
+
+        🎯 ГЛАВНОЕ ПРАВИЛО: Отвечай ТОЛЬКО на основе предоставленного контекста из базы знаний.
+
+        📋 ИНСТРУКЦИИ ПО СТИЛЮ ОТВЕТОВ:
+        • Тон: тёплый, гостеприимный, профессиональный
+        • Стиль: можешь формулировать ответы своими словами, добавлять приветствия и вежливые фразы
+        • Структура: делай ответы понятными и структурированными (используй списки, абзацы)
+        • Длина: 2-5 предложений, в зависимости от вопроса
+        • Ссылки: можешь упоминать источники [1], [2] если это уместно
+
+        ⚠️ ОГРАНИЧЕНИЯ:
+        • Если информации НЕТ в контексте → честно скажи "К сожалению, у меня нет информации по этому вопросу в базе знаний"
+        • НИКОГДА не выдумывай факты, даты, цифры или детали
+        • НЕ добавляй информацию из общих знаний о яхтинге или Web3
+        • При неуверенности - лучше сказать "не знаю", чем выдумать
+
+        Предоставленный контекст из базы знаний:
+        ${contextResult.context || 'Контекст не найден. Сообщи пользователю, что информации нет.'}`,
+        en: `You are Steward DAOsail, a friendly and hospitable assistant for the DAOsail project.
+        Your task is to welcome new visitors and answer their questions about the club, project, yachting, and Web3.
+
+        🎯 MAIN RULE: Answer ONLY based on the provided context from the knowledge base.
+
+        📋 ANSWER STYLE INSTRUCTIONS:
+        • Tone: warm, hospitable, professional
+        • Style: you can formulate answers in your own words, add greetings and polite phrases
+        • Structure: make answers clear and structured (use lists, paragraphs)
+        • Length: 2-5 sentences, depending on the question
+        • References: you can mention sources [1], [2] if appropriate
+
+        ⚠️ LIMITATIONS:
+        • If information is NOT in context → honestly say "Unfortunately, I don't have information on this in the knowledge base"
+        • NEVER invent facts, dates, numbers, or details
+        • DO NOT add information from general knowledge about yachting or Web3
+        • When uncertain - better to say "I don't know" than to invent
+
+        Provided context from knowledge base:
+        ${contextResult.context || 'Context not found. Inform user that information is not available.'}`
       }
     };
 
@@ -168,8 +263,8 @@ export async function POST(request: NextRequest) {
     let systemPrompt = baseSystemPrompts[assistantType as keyof typeof baseSystemPrompts]?.[userLanguage]
       || baseSystemPrompts.navigator.ru;
 
-    // Добавляем контекст, если он найден
-    if (contextResult.context) {
+    // Добавляем контекст, если он найден (для steward контекст уже в промпте)
+    if (contextResult.context && assistantType !== 'steward') {
       systemPrompt += `\n\n${contextResult.context}`;
     }
 
@@ -251,6 +346,7 @@ export async function POST(request: NextRequest) {
                     timestamp: new Date().toISOString(),
                     model: 'gpt-4o-mini',
                     assistantType,
+                    citations: contextResult.citations || [],
                     metadata: {
                       userRole: effectiveUserRole,
                       knowledgeChunksUsed: contextResult.chunksUsed,
@@ -307,6 +403,7 @@ export async function POST(request: NextRequest) {
         timestamp: new Date().toISOString(),
         model: 'gpt-4o-mini',
         assistantType,
+        citations: contextResult.citations || [],
         metadata: {
           userRole: effectiveUserRole,
           knowledgeChunksUsed: contextResult.chunksUsed,
