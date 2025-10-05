@@ -1,9 +1,9 @@
 # Project Architecture Overview
 
 **Проект:** DAOsail Prototype - Next.js App
-**Версия:** 0.8.3
-**Дата обновления:** 2025-10-04
-**Статус:** Активная разработка - Phase 8.3 Steward RAG Integration (завершена базовая версия)
+**Версия:** 0.7.2
+**Дата обновления:** 2025-01-24
+**Статус:** Активная разработка - Phase 7.2 Architecture Analysis Complete
 
 ---
 
@@ -46,7 +46,6 @@
 - **LLM Model:** OpenAI GPT-4o-mini для экономичных, но качественных ответов
 - **Embeddings:** OpenAI text-embedding-ada-002 для vector поиска
 - **Vector Database:** Supabase pgvector extension
-- **RAG System:** Retrieval-Augmented Generation с базой знаний
 - **Knowledge Base:** Структурированная база данных с парусной тематикой
 
 ---
@@ -74,7 +73,6 @@ app/
 │   └── tutorial/         # Страница обучения
 ├── api/                  # API Routes
 │   ├── chat/             # OpenAI чат интеграция
-│   ├── faq/              # FAQ агент с RAG поиском (NEW!)
 │   └── search-knowledge/ # Поиск в базе знаний
 ├── layout.tsx            # Root layout
 └── globals.css           # Глобальные стили
@@ -93,8 +91,7 @@ components/
 │   └── achievements-tab.tsx   # Вкладка достижений
 └── ui/                   # Переиспользуемые UI компоненты
     ├── hero-card.tsx     # Главная карточка
-    ├── chat-box.tsx      # Интерфейс чата (обновлен для FAQ)
-    ├── citations-display.tsx # Показ источников FAQ (NEW!)
+    ├── chat-box.tsx      # Интерфейс чата
     ├── quick-questions.tsx # Быстрые вопросы
     ├── avatar-upload.tsx # Компонент загрузки аватаров
     ├── community-card.tsx # Карточки внешних сообществ
@@ -115,7 +112,7 @@ lib/
 │   └── embedding-service.ts # Работа с vector embeddings
 ├── types/
 │   ├── profile.ts        # Типы для профилей пользователей
-│   └── assistants.ts     # Типы ассистентов + FAQ messages (NEW!)
+│   └── assistants.ts     # Типы ассистентов
 ├── config/
 │   └── roles.ts          # Конфигурация ролей и прогресса
 └── utils.ts              # Общие утилиты
@@ -127,19 +124,11 @@ data/
 supabase/                 # Supabase CLI конфигурация
 ├── migrations/           # Миграции базы данных
 │   ├── 001_create_profiles_schema.sql
-│   ├── 002_setup_vector_embeddings.sql
-│   └── 20250926000001_create_faq_tables.sql (NEW!)
-├── functions/            # Edge Functions
-│   └── handle-faq/       # FAQ агент с RAG (NEW!)
+│   └── 002_setup_vector_embeddings.sql
 ├── config.toml          # Конфигурация Supabase CLI
 └── seed.sql             # Начальные данные + база знаний
 
 scripts/                  # Утилиты и скрипты
-├── embeddings/           # Работа с векторной БД (NEW!)
-│   ├── upload-faq.ts     # Загрузка FAQ документов
-│   └── package.json      # Зависимости для embeddings
-├── test-faq.js          # Тестирование FAQ агента (NEW!)
-└── simple-faq-data.md   # Тестовые данные FAQ (NEW!)
 ```
 
 ---
@@ -326,7 +315,6 @@ export function MyComponent() {
 - **Шкипер ДАО (DAO Advisor)** → управление DAO и голосование
 - **Шкипер Партнер (AI Guide)** → ИИ технологии и автоматизация [PREMIUM]
 - **Шкипер Компаньон (Personal)** → личная помощь и организация [AUTH REQUIRED]
-- **Стюард (Steward)** → встречает гостей, отвечает строго по базе знаний с RAG поиском
 
 ### Mock Data (data/)
 **Назначение:** Fallback данные (больше не используются в чате)
@@ -507,66 +495,6 @@ User Click → Next.js Link →
 - [x] **Dependency updates** - Security audit (0 vulnerabilities), caniuse-lite update
 - [x] **Development infrastructure** - Analysis tools (depcheck, ts-prune)
 
-**Phase 8.0: Database Fixes & Email Integration (Завершена)**
-- [x] **Email leads table** - Создана таблица для сохранения email гостей (migration 008)
-- [x] **Profile email integration** - Email теперь сохраняется и отображается в профилях (migration 009)
-- [x] **Profile editing fix** - Исправлено редактирование никнейма, города, описания
-- [x] **TypeScript types update** - Обновлены типы для поддержки email в profiles
-- [ ] **Email leads API** - REST endpoint для сохранения email из формы email-capture
-- [ ] **Guest chat tracking** - Связывание гостевых чатов с email лидами
-
-**Phase 8.1: FAQ Agent MVP (Завершена v0.8.1) 🎉**
-- [x] **FAQ Agent Architecture** - Полноценный RAG-агент с векторным поиском
-- [x] **Database Schema** - Таблицы chat_messages, knowledge_chunks + match_docs RPC function
-- [x] **Edge Function** - handle-faq с OpenAI API интеграцией и поиском по БЗ
-- [x] **API Integration** - /api/faq route для фронтенд интеграции
-- [x] **Chat UI Updates** - Поддержка FAQ режима в ChatBox с citations display
-- [x] **Citations Component** - Красивый показ источников с релевантностью
-- [x] **Embeddings Pipeline** - Скрипты загрузки документов в векторную БД
-- [x] **Testing Infrastructure** - Локальное тестирование агента с моковыми данными
-- [x] **Prompt Engineering** - Строгий промпт без галлюцинаций, только по базе знаний
-- [x] **TypeScript Integration** - Расширенные типы для FAQ messages с citations
-
-**Phase 8.2: FAQ Agent Unification (Завершена v0.8.2) ✅**
-- [x] **Database Analysis** - Проверка структуры существующих таблиц chunks и knowledge_documents
-- [x] **Chunks Table Extension** - Добавлены колонки accessible_roles[] и tags[] к таблице chunks
-- [x] **RPC Function Update** - match_chunks_docs() с role-based фильтрацией через chunks.accessible_roles && roles
-- [x] **Edge Function Refactoring** - Переключение handle-faq с knowledge_chunks на chunks таблицу
-- [x] **Data Migration Verification** - Проверено 85684+ записей с заполненными accessible_roles: ['public']
-- [x] **Edge Function Deployment** - Деплой обновленного handle-faq в Supabase
-- [x] **Environment Fixes** - Исправлено несоответствие портов (.env.local vs dev server)
-- [x] **Error Debugging** - Устранена ошибка 500 в POST /api/faq
-- [x] **End-to-End Testing** - Полное тестирование FAQ агента с реальными вопросами
-- [x] **Citations Verification** - Проверка отображения источников из chunks.path
-
-**Phase 8.3: Steward RAG Integration (Завершена v0.8.3) ✅**
-- [x] **RAG Search Implementation** - Добавлен векторный поиск в /api/chat для Steward
-- [x] **Steward Prompt Engineering** - Создан специальный промпт: строго по базе знаний + гибкая подача
-- [x] **Citations Support** - Добавлены citations (источники) для ответов Steward в streaming режиме
-- [x] **FAQ Assistant Removal** - Удален дублирующий FAQ помощник из системы (осталась только Edge Function)
-- [x] **Code Integration** - Steward теперь использует match_chunks_docs() RPC функцию
-- [x] **Logging Added** - Добавлено подробное логирование для диагностики RAG поиска
-- [x] **Database Migration Fix** - Применена миграция user_chats.session_id
-- [x] **KB Repository Clone** - Клонирован daosail-kb репозиторий в проект
-- [x] **Knowledge Base Script** - Создан scripts/rebuild-steward-knowledge.mjs для загрузки БЗ
-- [x] **KB Sources Definition** - Определены публичные источники (charter/, faq/, yachting/, decentralization/)
-- [x] **Embeddings Pipeline** - 17 chunks загружено с OpenAI embeddings (ada-002)
-- [x] **RPC Function Testing** - Протестирован match_chunks_docs() - similarity 80-91%
-- [x] **End-to-End Testing** - Проверка работы в UI показала базовую функциональность
-- [x] **Citation Display** - Citations отображаются корректно (пока не используются активно)
-
-**Известные ограничения:**
-- ⚠️ **Поверхностные ответы** - Чанки слишком маленькие (1-2 на документ), теряется контекст проекта
-- ⚠️ **Низкая специфика** - Ответы общие, без уникальных деталей DAOsail как "клуба двух реальностей"
-- 🔄 **Требуется оптимизация** - Нужно улучшить чанкование для более глубоких и специфичных ответов
-
-### 📋 Планируется (Phase 9: Advanced RAG Features)
-- [ ] **Multi-agent Orchestration** - Мета-агент с под-агентами (Тренер, DAO, FAQ)
-- [ ] **Knowledge Base Expansion** - Загрузка полной базы знаний DAOsail
-- [ ] **Advanced Search** - Семантический поиск с фильтрами по ролям и категориям
-- [ ] **Context Optimization** - Умное управление контекстом для ответов ИИ
-- [ ] **Performance Optimization** - Sub-second response times для поиска
-
 ### 📋 Планируется (Phase 8: Social & Advanced Features)
 - [ ] Система лидербордов и рейтингов
 - [ ] Социальные функции (друзья, группы)
@@ -630,29 +558,11 @@ chat_search_index (
   message_role, assistant_type, chat_title,
   search_vector tsvector, timestamps
 )
-
--- База знаний с vector embeddings (UPDATED v0.8.2!)
-chunks (
-  id bigserial, source text, path text, content text,
-  embedding vector(1536), metadata jsonb,
-  accessible_roles text[], tags text[]
-)
-
--- Сообщения FAQ агента (NEW v0.8.1!)
-chat_messages (
-  id, session_id, role, content, agent, created_at, meta jsonb
-)
 ```
 
-### Vector Search & RAG System (UPDATED v0.8.2)
+### Vector Search System
 - **pgvector extension** включен для семантического поиска
 - **Embeddings model** OpenAI text-embedding-ada-002 (1536 dimensions)
-- **Search function** match_chunks_docs(query_embedding, match_count, roles[], min_similarity) с role-based доступом
-- **Unified chunks table** - Одна таблица для всех embeddings с role-based access control
-- **FAQ Agent** - Полноценный RAG-агент с citations и строгими guardrails против галлюцинаций
-- **Role-based filtering** - chunks.accessible_roles && roles для безопасного доступа к знаниям
-- **Data volume** - 85684+ чанков документации с полными embeddings
-- **Tags support** - Фильтрация по темам (sailing, navigation, dao, architecture, etc.)
 - **Languages** поддержка ru/en контента
 
 ### Navigation & Chat Search Functions (NEW v0.6.0)
@@ -1253,4 +1163,4 @@ if (process.env.NODE_ENV === 'development') {
 ---
 
 *Документ поддерживается в актуальном состоянии для эффективной разработки*
-*Последнее обновление: 2025-01-31 (добавлены Claude 4.5 рекомендации)*
+*Последнее обновление: 2025-01-24 (Phase 7.2 Architecture Analysis Complete)*
